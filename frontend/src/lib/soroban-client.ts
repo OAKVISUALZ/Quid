@@ -108,7 +108,7 @@ export class ContractInvokeError extends Error {
  * `Error(Contract, #9)`; the base64 result XDR is the fallback when a node
  * returns no diagnostics.
  */
-function describeSorobanFailure(res: unknown): string {
+export function describeSorobanFailure(res: unknown): string {
   const diagnostics = (() => {
     const events = (res as { diagnosticEventsXdr?: unknown })
       ?.diagnosticEventsXdr;

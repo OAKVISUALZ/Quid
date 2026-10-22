@@ -204,3 +204,94 @@ export function parseQuidError(errorResult: unknown): QuidErrorInfo {
   const code = parseInt(match[1], 10) as QuidErrorCode;
   return QUID_ERROR_MAP[code] ?? fallback;
 }
+
+/**
+ * Issue #340 – error codes for `quid-milestone-escrow`
+ * (quid-contract/contracts/quid-milestone-escrow/src/error.rs). A separate map
+ * because the numeric codes collide with `quid-store`'s (e.g. `#1` means
+ * something different in each contract) — never reuse `QUID_ERROR_MAP` here.
+ */
+const MILESTONE_ESCROW_ERROR_MAP: Record<number, QuidErrorInfo> = {
+  1: {
+    title: 'Invalid program state',
+    description: 'This action cannot be performed while the program or milestone is in its current state.',
+    retryable: false,
+  },
+  2: {
+    title: 'Invalid amount',
+    description: 'The amount entered is invalid, or exceeds what remains unallocated on the program.',
+    retryable: true,
+  },
+  3: {
+    title: 'Program not found',
+    description: 'This escrow program does not exist on-chain.',
+    retryable: false,
+  },
+  4: {
+    title: 'Milestone not found',
+    description: 'This milestone does not exist on this program.',
+    retryable: false,
+  },
+  5: {
+    title: 'Not authorized',
+    description: 'Only the program sponsor or an assigned reviewer can perform this action.',
+    retryable: false,
+  },
+  6: {
+    title: 'Contract not initialized',
+    description: 'The escrow contract has not been initialized with an admin yet.',
+    retryable: false,
+  },
+  7: {
+    title: 'Already initialized',
+    description: 'The escrow contract already has an admin set.',
+    retryable: false,
+  },
+};
+
+export function parseMilestoneEscrowError(errorResult: unknown): QuidErrorInfo {
+  const fallback: QuidErrorInfo = {
+    title: 'Transaction failed',
+    description: 'An unexpected error occurred on-chain. Please try again or contact support.',
+    retryable: true,
+  };
+
+  if (!errorResult) return fallback;
+  const raw = typeof errorResult === 'string' ? errorResult : JSON.stringify(errorResult);
+  const match = raw.match(/#(\d+)/);
+  if (!match) return fallback;
+
+  return MILESTONE_ESCROW_ERROR_MAP[parseInt(match[1], 10)] ?? fallback;
+}
+
+/**
+ * Issue #341 – error codes for `quid-tip-jar`
+ * (quid-contract/contracts/quid-tip-jar/src/error.rs).
+ */
+const TIP_JAR_ERROR_MAP: Record<number, QuidErrorInfo> = {
+  1: {
+    title: 'Invalid tip amount',
+    description: 'The tip amount must be greater than zero.',
+    retryable: true,
+  },
+  2: {
+    title: 'Invalid recipient',
+    description: 'You cannot tip yourself. Pick a different hunter address.',
+    retryable: false,
+  },
+};
+
+export function parseTipJarError(errorResult: unknown): QuidErrorInfo {
+  const fallback: QuidErrorInfo = {
+    title: 'Transaction failed',
+    description: 'An unexpected error occurred on-chain. Please try again or contact support.',
+    retryable: true,
+  };
+
+  if (!errorResult) return fallback;
+  const raw = typeof errorResult === 'string' ? errorResult : JSON.stringify(errorResult);
+  const match = raw.match(/#(\d+)/);
+  if (!match) return fallback;
+
+  return TIP_JAR_ERROR_MAP[parseInt(match[1], 10)] ?? fallback;
+}

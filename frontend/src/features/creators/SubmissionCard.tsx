@@ -9,6 +9,7 @@ export default function SubmissionCard({
   submission,
   onApprove,
   onReject,
+  onTip,
   isApproved,
   isPaying = false,
   isRejecting = false,
@@ -18,6 +19,8 @@ export default function SubmissionCard({
   submission: Submission;
   onApprove: () => void;
   onReject?: () => void;
+  /** Issue #341: opens the send-tip modal for this hunter. Only offered once approved. */
+  onTip?: () => void;
   isApproved?: boolean;
   /** True while the payout transaction is in flight. */
   isPaying?: boolean;
@@ -130,6 +133,16 @@ export default function SubmissionCard({
                 <span className="px-3 py-1  text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/30">
                   Rejected
                 </span>
+              )}
+
+              {submission.status === "approved" && onTip && (
+                <button
+                  onClick={onTip}
+                  className="brutal-border brutal-shadow bg-brutal-yellow hover:translate-x-[-1px] hover:translate-y-[-1px] text-background px-3 py-1 text-sm font-medium transition-colors"
+                  title="Send an extra tip to this hunter"
+                >
+                  🎁 Tip
+                </button>
               )}
 
               <button

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { CheckCircle, AlertCircle } from "lucide-react";
@@ -16,8 +16,10 @@ import {
   cancelMissionToContract,
   rejectSubmissionToContract,
 } from "@/lib/soroban-client";
+import { getMissionTipTotal } from "@/lib/tip-jar-client";
 import { parseQuidError } from "@/lib/errorMap";
 import { toast } from "@/context/ToastContext";
+import SendTipModal from "@/components/creator/send-tip-modal";
 
 type Notification = { type: "success" | "error"; message: string };
 
@@ -30,12 +32,17 @@ export default function CreatorQuestDetail({
   questId,
   isActive = true,
   loading = false,
+  error,
+  onRetry,
 }: {
   quest?: Quest | null;
   submissions: Submission[];
   questId?: string;
   isActive?: boolean;
   loading?: boolean;
+  /** Issue #325: set when the quest itself failed to load from the API. */
+  error?: string | null;
+  onRetry?: () => void;
 }) {
   const router = useRouter();
   const { publicKey, connected, isNetworkMismatch } = useWallet();
@@ -46,6 +53,10 @@ export default function CreatorQuestDetail({
   const [payingId, setPayingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [notification, setNotification] = useState<Notification | null>(null);
+  // Issue #341: send-tip modal target + the mission's running tip total.
+  const [tipTarget, setTipTarget] = useState<Submission | null>(null);
+  const [tipTotal, setTipTotal] = useState<bigint | null>(null);
+  const [tipTotalError, setTipTotalError] = useState<string | null>(null);
 
   // Issue #322: optimistic status override once pause/cancel lands on-chain.
   // `quest` itself comes from `useQuestData`, which has no mutation API yet,
@@ -87,6 +98,42 @@ export default function CreatorQuestDetail({
     0,
   );
   const estimatedRefund = Math.round(perWinnerReward * remainingSlots);
+
+  // Issue #341: best-effort read of the on-chain running tip total for this
+  // mission. There is no per-tip history endpoint yet (see PR description),
+  // so this total is the closest available stand-in for "tip history".
+  useEffect(() => {
+    if (!publicKey || quest?.missionId == null) {
+      const timeoutId = window.setTimeout(() => setTipTotal(null), 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    let cancelled = false;
+    const missionId = quest.missionId;
+    const address = publicKey;
+    const timeoutId = window.setTimeout(() => {
+      getMissionTipTotal(missionId, address)
+        .then((total) => {
+          if (!cancelled) {
+            setTipTotal(total);
+            setTipTotalError(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            setTipTotal(null);
+            setTipTotalError(
+              err instanceof Error ? err.message : "Unable to read tip total",
+            );
+          }
+        });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      cancelled = true;
+    };
+  }, [publicKey, quest?.missionId]);
 
   const handleApprove = async (submission: Submission) => {
     if (!canPay || quest?.missionId == null) return;
@@ -270,6 +317,21 @@ export default function CreatorQuestDetail({
     }
   };
   const [activeTab, setActiveTab] = useState<"details" | "response">("details");
+
+  if (error && !loading && !quest) {
+    return (
+      <div className="text-foreground px-3 py-1">
+        <QuestHeader />
+        <EmptyState
+          title="Could not load this quest"
+          description={error}
+          variant="card"
+          action={onRetry ? { label: "Try again", onClick: onRetry } : undefined}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="text-foreground px-3 py-1">
       <QuestHeader />
@@ -473,9 +535,20 @@ export default function CreatorQuestDetail({
             <p className="text-foreground">Deadline</p>
             <p className="text-foreground">Time Left</p>
           </div>
-          <div className=" border-r  border-foreground flex flex-col gap-1 items-start text-foreground p-2 py-4 h-screen">
+          <div className=" border-r border-b border-foreground flex flex-col gap-1 items-start text-foreground p-2 py-4">
             <p className="text-foreground">Winner announcement</p>
             <p>24th January, 2026</p>
+          </div>
+          {/* Issue #341: stand-in "tip history" until a per-tip indexer endpoint exists. */}
+          <div className=" border-r border-foreground flex flex-col gap-2 items-start text-foreground p-2 py-6">
+            <h2 className="text-xl font-semibold">
+              {tipTotal != null
+                ? `${(Number(tipTotal) / 10_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM`
+                : tipTotalError
+                  ? "—"
+                  : "…"}
+            </h2>
+            <p className="text-foreground">Total tips sent (on-chain)</p>
           </div>
         </div>
         {/* END OF ABOUT SURVERY SECTION  */}
@@ -522,6 +595,11 @@ export default function CreatorQuestDetail({
                     submission={{ ...sub, status: getEffectiveStatus(sub) }}
                     onApprove={() => void handleApprove(sub)}
                     onReject={() => setRejectConfirm(sub.id)}
+                    onTip={
+                      isOwner && sub.hunterAddress
+                        ? () => setTipTarget(sub)
+                        : undefined
+                    }
                     isApproved={approvedSubmissions.includes(sub.id)}
                     isPaying={payingId === sub.id}
                     isRejecting={rejectingId === sub.id}
@@ -574,6 +652,16 @@ export default function CreatorQuestDetail({
           </div>
         </div>
       </div>
+      {tipTarget && tipTarget.hunterAddress && quest?.missionId != null && (
+        <SendTipModal
+          isOpen={Boolean(tipTarget)}
+          onClose={() => setTipTarget(null)}
+          missionId={quest.missionId}
+          hunterAddress={tipTarget.hunterAddress}
+          hunterName={tipTarget.user}
+          onSuccess={() => setTipTarget(null)}
+        />
+      )}
     </div>
   );
 }
