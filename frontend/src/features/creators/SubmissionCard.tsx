@@ -11,6 +11,7 @@ export default function SubmissionCard({
   onReject,
   isApproved,
   isPaying = false,
+  isRejecting = false,
   approveDisabled = false,
   approveDisabledReason,
 }: {
@@ -20,6 +21,8 @@ export default function SubmissionCard({
   isApproved?: boolean;
   /** True while the payout transaction is in flight. */
   isPaying?: boolean;
+  /** True while the reject_submission transaction is in flight (issue #321). */
+  isRejecting?: boolean;
   /** Blocks the approve CTA — wrong network, or not the quest founder. */
   approveDisabled?: boolean;
   /** Shown as the disabled button's tooltip. */
@@ -104,7 +107,7 @@ export default function SubmissionCard({
                 <>
                   <button
                     onClick={onApprove}
-                    disabled={approveDisabled || isPaying}
+                    disabled={approveDisabled || isPaying || isRejecting}
                     className="brutal-border brutal-shadow bg-brutal-pink hover:translate-x-[-1px] hover:translate-y-[-1px] text-foreground px-3 py-1  text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     title={approveDisabled ? approveDisabledReason : "Approve submission"}
                   >
@@ -113,11 +116,11 @@ export default function SubmissionCard({
                   {onReject && (
                     <button
                       onClick={onReject}
-                      disabled={isPaying}
+                      disabled={isPaying || isRejecting}
                       className="border border-red-500/50 text-red-400 hover:bg-red-500/10 px-3 py-1  text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                       title="Reject submission"
                     >
-                      ✕ Reject
+                      {isRejecting ? "Rejecting…" : "✕ Reject"}
                     </button>
                   )}
                 </>

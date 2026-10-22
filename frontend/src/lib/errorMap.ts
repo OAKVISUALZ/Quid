@@ -10,7 +10,10 @@
  * message using this module.
  */
 
-export type QuidErrorCode = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+export type QuidErrorCode =
+  | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+  | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+  | 21 | 22 | 23 | 24 | 25;
 
 export interface QuidErrorInfo {
   /** Short label shown in toasts / inline banners */
@@ -123,6 +126,54 @@ export const QUID_ERROR_MAP: Record<QuidErrorCode, QuidErrorInfo> = {
   17: {
     title: 'Contract configuration error',
     description: 'The fee collector address has not been configured. Contact the Quid team.',
+    retryable: false,
+  },
+  /** StakingPoolNotSet = 18 */
+  18: {
+    title: 'Contract configuration error',
+    description: 'The staking pool address has not been configured. Contact the Quid team.',
+    retryable: false,
+  },
+  /** HunterBanned = 19 */
+  19: {
+    title: 'Hunter banned',
+    description: 'This wallet is banned or muted and cannot submit feedback to this quest.',
+    retryable: false,
+  },
+  /** ModerationRegistryNotSet = 20 */
+  20: {
+    title: 'Contract configuration error',
+    description: 'The moderation registry address has not been configured. Contact the Quid team.',
+    retryable: false,
+  },
+  /** AlreadyRejected = 21 — issue #321 */
+  21: {
+    title: 'Already rejected',
+    description: 'This submission has already been rejected and its stake already refunded.',
+    retryable: false,
+  },
+  /** ExpiryInThePast = 22 */
+  22: {
+    title: 'Invalid deadline',
+    description: 'The quest deadline must be in the future.',
+    retryable: true,
+  },
+  /** MissionExpired = 23 */
+  23: {
+    title: 'Quest expired',
+    description: 'This quest’s deadline has passed and it no longer accepts submissions.',
+    retryable: false,
+  },
+  /** MissionNotExpired = 24 */
+  24: {
+    title: 'Quest not expired',
+    description: 'This quest has not reached its deadline yet, so its escrow cannot be reclaimed.',
+    retryable: false,
+  },
+  /** ReputationNotSet = 25 */
+  25: {
+    title: 'Contract configuration error',
+    description: 'The reputation registry address has not been configured. Contact the Quid team.',
     retryable: false,
   },
 };
