@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 
 export type SubmissionStatus = "pending" | "approved" | "rejected";
-export type QuestStatus = "active" | "completed" | "cancelled" | "draft";
+/** Issue #322: `paused` blocks new submissions without touching escrow. */
+export type QuestStatus = "active" | "paused" | "completed" | "cancelled" | "draft";
 
 export type Quest = {
   id: string;

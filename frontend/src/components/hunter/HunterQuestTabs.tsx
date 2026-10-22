@@ -23,6 +23,12 @@ interface Quest {
   due: string;
   reward: string;
   status?: QuestStatus;
+  /**
+   * Issue #322: true once the founder has paused the mission on-chain
+   * (`pause_mission`). Blocks the "Submit Feedback" CTA without touching an
+   * already-submitted entry's status.
+   */
+  isPaused?: boolean;
 }
 
 const tabs: Array<{ id: QuestTab; label: string; count?: number }> = [
@@ -307,6 +313,9 @@ function QuestRow({
   onSubmitFeedback: () => void;
 }) {
   const isSubmitted = quest.status === "Submitted" || quest.status === "Reviewing";
+  // Issue #322: a paused mission blocks *new* submissions; one already
+  // submitted stays visible via the `isSubmitted` branch below.
+  const isPaused = Boolean(quest.isPaused) && !isSubmitted;
 
   return (
     <article className="grid gap-5 sm:grid-cols-[96px_1fr_auto] sm:items-center  p-2 transition-colors hover:bg-white/[0.02]">
@@ -350,6 +359,10 @@ function QuestRow({
         {/* Issue #349: show PendingBadge when tx is signed but indexer hasn't caught up yet */}
         {isPending ? (
           <PendingBadge />
+        ) : isPaused ? (
+          <span className="text-xs font-medium text-yellow-400">
+            Paused by founder
+          </span>
         ) : !isSubmitted ? (
           <button
             type="button"

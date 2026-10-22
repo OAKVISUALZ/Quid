@@ -135,6 +135,8 @@ Copy the ids into `frontend/.env.example` to point a local frontend at them.
 | Contract | Testnet contract id | State |
 |----------|---------------------|-------|
 | `quid-reputation` | `CDXKNUE2ZNZRZLJI5BK6M2KBMLXLAY4ITWTZG6G3BZP2O2AMQKHRCEWC` | Deployed and initialized; `get_admin` verified |
+| `quid-store` | `CAZL6GNSP42AOON45F6E55PUDNRS3RWOG6BCHKBTO4NWAWGOBIBPPYI7` | Deployed (issue #321); no `initialize` entrypoint, so nothing to configure. `get_mission_count` verified (returns `0`) |
+| `quid-milestone-escrow` | `CBQPWWJXPA4Y5ONQOCNXTFLGU7NMM34YSA3JKIGUQY2TFHQ453E5Z2SV` | Deployed and initialized (issue #284); `get_admin` and `get_program_count` verified |
 
 `quid-reputation` was initialized with the deploying account as the initial
 admin. The admin secret is a throwaway Friendbot identity — **do not use this
@@ -167,8 +169,17 @@ stellar contract invoke \
   get_admin
 ```
 
-The other contracts in this workspace have not been deployed to testnet yet;
-use the `## Deploy (testnet)` steps below.
+Both `quid-store` and `quid-milestone-escrow` were deployed with their own
+throwaway Friendbot identity (same pattern as `quid-reputation`, different
+keypair) — **do not use either for anything that needs a trusted admin or
+real funds.** Redeploy with your own identity for real use, following the
+same `stellar contract deploy` pattern as `quid-reputation`; for
+`quid-milestone-escrow`, also re-run `initialize --admin <YOUR_PUBLIC_KEY>`
+against the new id.
+
+The remaining contracts in this workspace (`quid-referral`, `quid-dispute`,
+`quid-badge-nft`, `quid-fee-collector`, `quid-mission-factory`) have not been
+deployed to testnet yet; use the `## Deploy (testnet)` steps below.
 
 ## Deploy (testnet)
 
@@ -295,6 +306,8 @@ stellar contract invoke \
 - `create_mission` — escrow rewards, optional asset gate
 - `submit_feedback` — hunter stake + IPFS CID
 - `payout_participant` — pay hunter, refund stake
+- `reject_submission` — owner-only; refunds the hunter's stake and marks the
+  submission `Rejected` without consuming a payout slot (issue #321)
 - `cancel_mission` / `pause_mission` / `update_mission_status`
 - `slash_hunter_stake` / treasury helpers
 - `set_fee_collector` / `get_fee_collector` — route the protocol fee to `quid-fee-collector`
@@ -312,17 +325,17 @@ values as Stellar addresses.
 | `MissionCreateEvent` | `["mission", "create"]` | `mission_id: u64`, `owner: Address`, `title: String`, `description_cid: String`, `reward_token: Address`, `reward_amount: i128`, `max_participants: u32`, `created_at: u64` | `create_mission`, after the mission is stored and any protocol fee is handled |
 | `SubNewEvent` | `["sub", "new"]` | `mission_id: u64`, `hunter: Address`, `ipfs_cid: String` | `submit_feedback`, after the submission and stake are stored |
 | `PayoutDoneEvent` | `["payout", "done"]` | `mission_id: u64`, `hunter: Address` | `payout_participant`, after the reward is paid and submission marked paid |
+| `SubmissionRejectedEvent` | `["sub", "reject"]` | `mission_id: u64`, `hunter: Address`, `stake_refunded: i128` | `reject_submission`, after the submission is marked `Rejected` and the stake is released (issue #321) |
 | `MissionCancelEvent` | `["mission", "cancel"]` | `mission_id: u64` (single-value data) | `cancel_mission`, after cancellation and refunds |
 | `MissionPauseEvent` | `["mission", "pause"]` | `mission_id: u64` (single-value data) | `pause_mission`, after the mission is paused |
 | `FeeChargedEvent` | `["fee", "charged"]` | `mission_id: u64`, `token: Address`, `amount: i128` | `create_mission`, only when a non-zero protocol fee is charged |
 
-There is currently no rejection event. `update_mission_status` also does not
-emit an event; adding a new event or changing an existing topic, field order,
-field type, or single-value encoding requires a reviewed schema change. Before
-merging such a change, update this catalog, notify backend/indexer owners,
-version and deploy the contract/indexer compatibility change together, and
-cover old and new event handling in tests. Do not silently reuse an existing
-topic with a different payload.
+`update_mission_status` emits no event. Adding a new event or changing an
+existing topic, field order, field type, or single-value encoding requires a
+reviewed schema change. Before merging such a change, update this catalog,
+notify backend/indexer owners, version and deploy the contract/indexer
+compatibility change together, and cover old and new event handling in tests.
+Do not silently reuse an existing topic with a different payload.
 
 ### `quid-reputation`
 
@@ -398,7 +411,6 @@ cargo test -p quid-mission-factory
 
 ## Known gaps (good contributor targets)
 
-- `reject_submission` + stake refund on `quid-store`
 - Mission expiry / auto-refund
 - Store → reputation hook on successful payout (also wires `quid-referral.record_payout`)
 - Store/reputation → `quid-badge-nft` `mint_badge` call on successful payout

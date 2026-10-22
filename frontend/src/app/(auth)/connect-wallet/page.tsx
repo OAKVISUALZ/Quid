@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Check } from 'lucide-react';
 import type { SupportedWallet } from '@/context/WalletProvider';
 import { useWallet } from '@/context/WalletProvider';
@@ -26,6 +26,17 @@ export default function ConnectWalletPage() {
   const [availableWallets, setAvailableWallets] = useState<SupportedWallet[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Issue #332: AuthGuard sends unauthenticated users here with
+  // `?returnTo=<path>` so they land back where they started instead of
+  // always restarting at account selection. Only ever an in-app path.
+  const rawReturnTo = searchParams.get('returnTo');
+  const returnTo =
+    rawReturnTo && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//')
+      ? rawReturnTo
+      : null;
+  const nextRoute = returnTo || ONBOARDING_ROUTES.accountType;
 
   useEffect(() => {
     const listAvailableWallets = async () => {
@@ -38,7 +49,7 @@ export default function ConnectWalletPage() {
 
   const handleWalletSelect = async () => {
     if (connected) {
-      router.push(ONBOARDING_ROUTES.accountType);
+      router.push(nextRoute);
       return;
     }
 
@@ -46,7 +57,7 @@ export default function ConnectWalletPage() {
     try {
       const address = await connect();
       if (address) {
-        router.push(ONBOARDING_ROUTES.accountType);
+        router.push(nextRoute);
       }
     } catch (error) {
       console.error('Wallet connection failed:', error);
@@ -143,7 +154,7 @@ export default function ConnectWalletPage() {
           <button
             type="button"
             disabled={isNetworkMismatch}
-            onClick={() => router.push(ONBOARDING_ROUTES.accountType)}
+            onClick={() => router.push(nextRoute)}
             className={`${brutalBtnPrimary} disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0_0_#0a0a0a]`}
             title={
               isNetworkMismatch
