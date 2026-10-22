@@ -6,7 +6,7 @@ import CreatorQuestDetail from "@/features/creators/CreatorQuestDetail";
 
 export default function QuestDetailPage({ params }: { params: Promise<{ questId: string }> }) {
   const { questId } = use(params);
-  const { quest, submissions, loading } = useQuestData(questId);
+  const { quest, submissions, loading, error, refetch } = useQuestData(questId);
 
   return (
     <CreatorQuestDetail
@@ -15,6 +15,8 @@ export default function QuestDetailPage({ params }: { params: Promise<{ questId:
       isActive={quest?.status === 'active'}
       submissions={submissions}
       loading={loading}
+      error={error}
+      onRetry={refetch}
     />
   );
 }

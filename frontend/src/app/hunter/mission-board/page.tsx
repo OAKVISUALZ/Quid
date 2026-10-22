@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { BriefcaseBusiness, RefreshCw, Search } from "lucide-react";
+import { AlertCircle, BriefcaseBusiness, RefreshCw, Search } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonList } from "@/components/ui/skeleton-list";
+import { fetchPublicMissions, type PublicMission } from "@/lib/missions-api";
+
+/** Issue #326: hunter mission board, wired to `GET /missions`. */
+
+type BoardFilter = "all" | "open" | "completed";
 
 interface Mission {
   id: string;
@@ -13,82 +18,99 @@ interface Mission {
   title: string;
   category: string;
   reward: string;
-  due: string;
+  posted: string;
   icon: string;
   status: "open" | "completed";
 }
 
-const mockMissions: Mission[] = [
-  {
-    id: "m-1",
-    brand: "Ruze.stellar",
-    title: "Download and test the latest Ruze.stellar 2.0",
-    category: "Product Quest",
-    reward: "640 XLM",
-    due: "Due in 6d",
-    icon: "/dashboard/brand1.svg",
-    status: "open",
-  },
-  {
-    id: "m-2",
-    brand: "CatBulk",
-    title: "Test our new game and leave feedback",
-    category: "Gaming",
-    reward: "1500 XLM",
-    due: "Due in 4d",
-    icon: "/dashboard/brand2.svg",
-    status: "open",
-  },
-  {
-    id: "m-3",
-    brand: "Mizu",
-    title: "Criticize our new feature at Mizu",
-    category: "DeFi",
-    reward: "730 XLM",
-    due: "Due in 5d",
-    icon: "/dashboard/brand3.svg",
-    status: "open",
-  },
-  {
-    id: "m-4",
-    brand: "TradeBot",
-    title: "Download and try the latest TradeBot",
-    category: "Trading",
-    reward: "3000 XLM",
-    due: "Due in 2d",
-    icon: "/dashboard/brand4.svg",
-    status: "open",
-  },
+const MISSION_ICONS = [
+  "/dashboard/brand1.svg",
+  "/dashboard/brand2.svg",
+  "/dashboard/brand3.svg",
+  "/dashboard/brand4.svg",
 ];
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function shortAddress(address: string): string {
+  return address.length > 10 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address;
+}
+
+function getRelativeTime(value: string): string {
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (elapsedSeconds < 60) return "just now";
+  if (elapsedSeconds < 3600) return `${Math.floor(elapsedSeconds / 60)}m ago`;
+  if (elapsedSeconds < 86400) return `${Math.floor(elapsedSeconds / 3600)}h ago`;
+  return `${Math.floor(elapsedSeconds / 86400)}d ago`;
+}
+
+function mapMission(mission: PublicMission, index: number): Mission {
+  const metadata = asRecord(mission.metadata);
+  const isOpen = mission.status === "OPEN" || mission.status === "STARTED";
+
+  return {
+    id: mission.id,
+    brand:
+      mission.owner?.displayName ||
+      (mission.owner?.address ? shortAddress(mission.owner.address) : "Quid Founder"),
+    title: mission.title,
+    category: typeof metadata.category === "string" ? metadata.category : "Product Quest",
+    reward: `${Number(mission.rewardAmount) || 0} XLM`,
+    posted: `Posted ${getRelativeTime(mission.createdAt)}`,
+    icon: MISSION_ICONS[index % MISSION_ICONS.length],
+    status: isOpen ? "open" : "completed",
+  };
+}
+
+/** `BoardFilter` -> the backend's `MissionQueryStatus`, when there is a direct mapping. */
+function filterToApiStatus(filter: BoardFilter): "OPEN" | "COMPLETED" | undefined {
+  if (filter === "open") return "OPEN";
+  if (filter === "completed") return "COMPLETED";
+  return undefined;
+}
 
 export default function MissionBoardPage() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "open" | "completed">("all");
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<BoardFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setMissions(mockMissions);
+  const loadMissions = useCallback(async (activeFilter: BoardFilter) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const apiMissions = await fetchPublicMissions({
+        status: filterToApiStatus(activeFilter),
+        sort: "newest",
+      });
+      setMissions(apiMissions.map(mapMission));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load missions");
+    } finally {
       setLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
+    }
   }, []);
 
+  useEffect(() => {
+    // Only re-fetch when the server-side filter changes; search stays client-side.
+    const timeoutId = window.setTimeout(() => void loadMissions(filter), 0);
+    return () => window.clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+
   const handleRefresh = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setMissions(mockMissions);
-      setLoading(false);
-    }, 400);
+    void loadMissions(filter);
   };
 
   const filteredMissions = missions.filter((m) => {
-    const matchesFilter = filter === "all" || m.status === filter;
     const matchesSearch =
       m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       m.brand.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesSearch;
+    return matchesSearch;
   });
 
   return (
@@ -140,7 +162,7 @@ export default function MissionBoardPage() {
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search quests or brands..."
+              placeholder="Search missions or founders..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full brutal-border bg-card py-2 pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -152,13 +174,25 @@ export default function MissionBoardPage() {
         <div className="mt-6">
           {loading ? (
             <SkeletonList count={4} variant="quest" />
+          ) : error ? (
+            <div className="flex flex-col items-center py-12 text-center">
+              <AlertCircle className="mb-3 size-6 text-red-400" />
+              <p className="text-sm text-red-300">{error}</p>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className="mt-4 brutal-border bg-card px-4 py-2 text-sm font-bold uppercase hover:bg-muted"
+              >
+                Try again
+              </button>
+            </div>
           ) : filteredMissions.length === 0 ? (
             <EmptyState
               title={searchQuery ? "No missions match your search" : "No missions available"}
               description={
                 searchQuery
-                  ? `No quests found matching "${searchQuery}". Try a different search term or clear the filter.`
-                  : "There are currently no missions listed in this category. Check back soon for new quests."
+                  ? `No missions found matching "${searchQuery}". Try a different search term or clear the filter.`
+                  : "There are currently no missions listed in this category. Check back soon for new missions."
               }
               variant="card"
               action={
@@ -198,7 +232,8 @@ export default function MissionBoardPage() {
                         <BriefcaseBusiness className="size-3.5" />
                         {mission.category}
                       </span>
-                      <span>{mission.due}</span>
+                      <span>{mission.posted}</span>
+                      <span className="uppercase">{mission.status}</span>
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 sm:items-end">

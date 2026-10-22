@@ -7,7 +7,8 @@ import stellarIcon from "../../../public/quest-detail/stellar-icon.png";
 interface CreatorQuestCardProps {
   id?: string;
   title: string;
-  category: "Product" | "Development" | "Marketing" | "Events";
+  /** Issue #325: free-text category from mission metadata, not a fixed set. */
+  category: string;
   budget: string;
   dueDate: string;
   submissionCount: {
