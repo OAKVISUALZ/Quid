@@ -8,15 +8,23 @@ import QuestHeader from "./QuestHeader";
 import SubmissionCard from "./SubmissionCard";
 import TaskInfo from "./TaskInfo";
 import NetworkMismatchBanner from "@/components/wallet/NetworkMismatchBanner";
-import { Submission, Quest } from "@/app/hooks/useQuestData";
+import { Submission, Quest, QuestStatus } from "@/app/hooks/useQuestData";
 import { useWallet } from "@/context/WalletProvider";
-import { payoutParticipantToContract } from "@/lib/soroban-client";
+import {
+  payoutParticipantToContract,
+  pauseMissionToContract,
+  cancelMissionToContract,
+  rejectSubmissionToContract,
+} from "@/lib/soroban-client";
 import { getMissionTipTotal } from "@/lib/tip-jar-client";
 import { parseQuidError } from "@/lib/errorMap";
 import { toast } from "@/context/ToastContext";
 import SendTipModal from "@/components/creator/send-tip-modal";
 
 type Notification = { type: "success" | "error"; message: string };
+
+/** Issue #322: a mission whose status blocks any further pause/cancel/payout. */
+const CLOSED_STATUSES: QuestStatus[] = ["cancelled", "completed"];
 
 export default function CreatorQuestDetail({
   quest,
@@ -43,22 +51,53 @@ export default function CreatorQuestDetail({
   const [rejectConfirm, setRejectConfirm] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [notification, setNotification] = useState<Notification | null>(null);
   // Issue #341: send-tip modal target + the mission's running tip total.
   const [tipTarget, setTipTarget] = useState<Submission | null>(null);
   const [tipTotal, setTipTotal] = useState<bigint | null>(null);
   const [tipTotalError, setTipTotalError] = useState<string | null>(null);
 
+  // Issue #322: optimistic status override once pause/cancel lands on-chain.
+  // `quest` itself comes from `useQuestData`, which has no mutation API yet,
+  // so the detail view tracks the post-tx status locally.
+  const [statusOverride, setStatusOverride] = useState<QuestStatus | null>(null);
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [missionActionPending, setMissionActionPending] = useState<
+    "pause" | "cancel" | null
+  >(null);
+
+  const effectiveStatus: QuestStatus | undefined = statusOverride ?? quest?.status;
+
   /**
-   * `payout_participant` calls `mission.owner.require_auth()` on-chain, so the
-   * UI blocks earlier rather than letting the founder burn a signing prompt on
-   * a call that can only revert.
+   * `payout_participant` / `pause_mission` / `cancel_mission` /
+   * `reject_submission` all call `mission.owner.require_auth()` on-chain, so
+   * the UI blocks earlier rather than letting the founder burn a signing
+   * prompt on a call that can only revert.
    */
   const isOwner = Boolean(
     connected && publicKey && quest?.ownerAddress === publicKey,
   );
 
   const canPay = isOwner && !isNetworkMismatch && quest?.missionId != null;
+  const canManageMission = canPay; // same gate; kept distinct for readability at call sites
+  const isMissionClosed = Boolean(
+    effectiveStatus && CLOSED_STATUSES.includes(effectiveStatus),
+  );
+  const isMissionPaused = effectiveStatus === "paused";
+
+  /** Issue #322: unfilled slots x reward-per-slot, mirroring the contract's
+   * `cancel_mission` / `expire_mission` refund formula. `approvedSubmissions`
+   * is the UI's best local signal for "slots already paid out" until the
+   * quest hook exposes a real `participantsCount`. */
+  const perWinnerReward =
+    quest?.slots && quest.slots > 0 ? quest.reward / quest.slots : 0;
+  const remainingSlots = Math.max(
+    (quest?.slots ?? 0) - approvedSubmissions.length,
+    0,
+  );
+  const estimatedRefund = Math.round(perWinnerReward * remainingSlots);
 
   // Issue #341: best-effort read of the on-chain running tip total for this
   // mission. There is no per-tip history endpoint yet (see PR description),
@@ -143,21 +182,127 @@ export default function CreatorQuestDetail({
     }
   };
 
-  const handleReject = (submissionId: string) => {
-    setRejectedSubmissions((prev) => {
-      if (prev.includes(submissionId)) {
-        return prev.filter((id) => id !== submissionId);
-      }
-      return [...prev, submissionId];
-    });
-    setApprovedSubmissions((prev) => prev.filter((id) => id !== submissionId));
-    toast.error("Submission rejected", {
-      description: rejectReason
-        ? `Reason: ${rejectReason}`
-        : `Submission #${submissionId} marked as rejected.`,
-    });
-    setRejectConfirm(null);
-    setRejectReason("");
+  /**
+   * Issue #321: invokes `reject_submission` on quid-store, which refunds the
+   * hunter's stake and marks the submission `Rejected` on-chain. The optional
+   * `rejectReason` has no on-chain field (the contract doesn't take one), so
+   * it is only ever surfaced in the toast / notification here.
+   */
+  const handleReject = async (submission: Submission) => {
+    if (!canManageMission || quest?.missionId == null) return;
+    if (!submission.hunterAddress) {
+      setNotification({
+        type: "error",
+        message: "This submission has no wallet address, so it cannot be rejected on-chain.",
+      });
+      return;
+    }
+
+    setRejectingId(submission.id);
+    setNotification(null);
+
+    try {
+      await rejectSubmissionToContract({
+        missionId: quest.missionId,
+        hunterAddress: submission.hunterAddress,
+        ownerAddress: publicKey as string,
+        reason: rejectReason || undefined,
+      });
+
+      setRejectedSubmissions((prev) =>
+        prev.includes(submission.id) ? prev : [...prev, submission.id],
+      );
+      setApprovedSubmissions((prev) => prev.filter((id) => id !== submission.id));
+
+      toast.error("Submission rejected", {
+        description: rejectReason
+          ? `Reason: ${rejectReason}`
+          : `Submission from ${submission.user} was rejected and their stake was refunded.`,
+      });
+      setNotification({
+        type: "success",
+        message: `Rejected ${submission.user}'s submission. Their stake was refunded on-chain.`,
+      });
+    } catch (error: unknown) {
+      const info = parseQuidError(error instanceof Error ? error.message : error);
+      setNotification({
+        type: "error",
+        message: `${info.title} — ${info.description}`,
+      });
+      toast.error("Reject failed", { description: info.description });
+    } finally {
+      setRejectingId(null);
+      setRejectConfirm(null);
+      setRejectReason("");
+    }
+  };
+
+  /** Issue #322: pause blocks new submissions; escrow stays put. */
+  const handlePauseMission = async () => {
+    if (!canManageMission || quest?.missionId == null) return;
+
+    setMissionActionPending("pause");
+    setNotification(null);
+
+    try {
+      await pauseMissionToContract({
+        missionId: quest.missionId,
+        ownerAddress: publicKey as string,
+      });
+
+      setStatusOverride("paused");
+      setNotification({
+        type: "success",
+        message: "Quest paused. New submissions are now blocked; existing escrow is untouched.",
+      });
+      toast.success("Quest paused", {
+        description: "Hunters can no longer submit new feedback to this quest.",
+      });
+    } catch (error: unknown) {
+      const info = parseQuidError(error instanceof Error ? error.message : error);
+      setNotification({
+        type: "error",
+        message: `${info.title} — ${info.description}`,
+      });
+      toast.error("Pause failed", { description: info.description });
+    } finally {
+      setMissionActionPending(null);
+      setPauseConfirmOpen(false);
+    }
+  };
+
+  /** Issue #322: cancel refunds the unspent reward pool back to the founder. */
+  const handleCancelMission = async () => {
+    if (!canManageMission || quest?.missionId == null) return;
+
+    setMissionActionPending("cancel");
+    setNotification(null);
+
+    try {
+      const receipt = await cancelMissionToContract({
+        missionId: quest.missionId,
+        ownerAddress: publicKey as string,
+      });
+
+      setStatusOverride("cancelled");
+      setNotification({
+        type: "success",
+        message: `Quest cancelled. ~${estimatedRefund} XLM refunded to your wallet. Tx ${receipt.txHash.slice(0, 8)}…`,
+      });
+      toast.success("Quest cancelled", {
+        description: `Unspent escrow (~${estimatedRefund} XLM) was refunded to your wallet.`,
+      });
+    } catch (error: unknown) {
+      const info = parseQuidError(error instanceof Error ? error.message : error);
+      setNotification({
+        type: "error",
+        message: `${info.title} — ${info.description}`,
+      });
+      toast.error("Cancel failed", { description: info.description });
+    } finally {
+      setMissionActionPending(null);
+      setCancelConfirmOpen(false);
+    }
   };
 
   const getEffectiveStatus = (sub: Submission): Submission["status"] => {
@@ -213,24 +358,135 @@ export default function CreatorQuestDetail({
           <p>{notification.message}</p>
         </div>
       )}
-      <div className="font-inter flex justify-between items-center w-full">
+      <div className="font-inter flex flex-col gap-4 justify-between items-start w-full md:flex-row md:items-center">
         <div className="flex flex-col justify-normal items-start gap-2 text-foreground py-6">
           <h2 className="text-2xl md:text-4xl font-bold">{quest?.title || "Quest"}</h2>
           <div className="flex gap-4 items-center text-sm md:text-base">
-            <span className={`px-3 py-1 rounded-full capitalize ${quest?.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
-              {quest?.status || "unknown"}
+            <span
+              className={`px-3 py-1 rounded-full capitalize ${
+                effectiveStatus === "active"
+                  ? "bg-green-500/20 text-green-400"
+                  : effectiveStatus === "paused"
+                    ? "bg-yellow-500/20 text-yellow-400"
+                    : effectiveStatus === "cancelled"
+                      ? "bg-red-500/20 text-red-400"
+                      : "bg-gray-500/20 text-gray-400"
+              }`}
+            >
+              {effectiveStatus || "unknown"}
             </span>
           </div>
         </div>
-        {isActive && (
-          <button
-            onClick={handleEditQuest}
-            className="text-sm text-[#9110FF] pr-6 cursor-pointer hover:text-[#b844ff] transition-colors duration-200"
-          >
-            Edit Quest
-          </button>
-        )}
+        <div className="flex items-center gap-3 pb-2 md:pb-0">
+          {isActive && (
+            <button
+              onClick={handleEditQuest}
+              className="text-sm text-[#9110FF] cursor-pointer hover:text-[#b844ff] transition-colors duration-200"
+            >
+              Edit Quest
+            </button>
+          )}
+          {/* Issue #322: pause/cancel, both owner-gated and destructive, so
+              both require an explicit confirm step before signing. */}
+          {canManageMission && !isMissionClosed && (
+            <>
+              <button
+                type="button"
+                onClick={() => setPauseConfirmOpen((prev) => !prev)}
+                disabled={isMissionPaused || missionActionPending !== null}
+                className="brutal-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-yellow-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                title={isMissionPaused ? "Quest is already paused" : "Pause new submissions"}
+              >
+                {isMissionPaused ? "Paused" : "Pause Quest"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCancelConfirmOpen((prev) => !prev)}
+                disabled={missionActionPending !== null}
+                className="border border-red-500/50 bg-background px-4 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Cancel quest and reclaim unspent escrow"
+              >
+                Cancel Quest
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {pauseConfirmOpen && (
+        <div className="brutal-border mb-4 bg-[#1A1330] p-4">
+          <p className="mb-3 text-sm text-foreground">
+            Pause this quest? Hunters will no longer be able to submit new
+            feedback. Existing escrow stays locked and submissions already
+            received can still be approved or rejected.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => void handlePauseMission()}
+              disabled={missionActionPending !== null}
+              className="bg-yellow-500 px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {missionActionPending === "pause" ? "Pausing…" : "Confirm Pause"}
+            </button>
+            <button
+              onClick={() => setPauseConfirmOpen(false)}
+              disabled={missionActionPending !== null}
+              className="border border-foreground bg-background px-4 py-2 text-sm text-foreground transition-colors hover:brutal-border"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cancelConfirmOpen && (
+        <div className="brutal-border mb-4 bg-[#1A1330] p-4">
+          <p className="mb-1 text-sm text-foreground">
+            Cancel this quest? This closes it permanently — no further
+            submissions, approvals, or payouts will be possible.
+          </p>
+          <p className="mb-3 text-sm font-semibold text-foreground">
+            Estimated refund to your wallet: ~{estimatedRefund} XLM
+            <span className="font-normal text-muted-foreground">
+              {" "}
+              ({remainingSlots} unfilled slot{remainingSlots === 1 ? "" : "s"} × ~
+              {Math.round(perWinnerReward)} XLM)
+            </span>
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => void handleCancelMission()}
+              disabled={missionActionPending !== null}
+              className="bg-red-500 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {missionActionPending === "cancel" ? "Cancelling…" : "Confirm Cancel"}
+            </button>
+            <button
+              onClick={() => setCancelConfirmOpen(false)}
+              disabled={missionActionPending !== null}
+              className="border border-foreground bg-background px-4 py-2 text-sm text-foreground transition-colors hover:brutal-border"
+            >
+              Keep Quest
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Issue #322: paused missions keep existing submissions reviewable but
+          block new ones — call that out so the founder isn't surprised when
+          the response count stops moving. */}
+      {isMissionPaused && (
+        <div className="mb-6 bg-yellow-500/10 border border-yellow-500/30 px-4 py-3 text-sm text-yellow-300">
+          This quest is paused. Hunters cannot submit new feedback until you
+          resume it; existing submissions can still be approved or rejected.
+        </div>
+      )}
+      {effectiveStatus === "cancelled" && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-300">
+          This quest is cancelled. No further submissions, approvals, or
+          payouts can happen.
+        </div>
+      )}
 
       {/* Quest Description */}
       {quest?.description && (
@@ -346,37 +602,44 @@ export default function CreatorQuestDetail({
                     }
                     isApproved={approvedSubmissions.includes(sub.id)}
                     isPaying={payingId === sub.id}
-                    approveDisabled={!canPay}
+                    isRejecting={rejectingId === sub.id}
+                    approveDisabled={!canPay || isMissionClosed}
                     approveDisabledReason={
-                      isNetworkMismatch
-                        ? "Switch your wallet to the correct network to pay out"
-                        : !isOwner
-                          ? "Only the quest founder can release a payout"
-                          : undefined
+                      isMissionClosed
+                        ? "This quest is cancelled or completed — no further payouts"
+                        : isNetworkMismatch
+                          ? "Switch your wallet to the correct network to pay out"
+                          : !isOwner
+                            ? "Only the quest founder can release a payout"
+                            : undefined
                     }
                   />
                   {rejectConfirm === sub.id && (
                     <div className="mx-4 mb-4 bg-[#1A1330] border border-red-500/30  p-4">
                       <p className="text-sm text-foreground mb-3">
-                        Are you sure you want to reject this submission?
+                        Are you sure you want to reject this submission? The
+                        hunter&apos;s stake will be refunded in full.
                       </p>
                       <textarea
                         value={rejectReason}
                         onChange={(e) => setRejectReason(e.target.value)}
                         placeholder="Optional reason for rejection…"
                         rows={2}
-                        className="w-full brutal-border bg-background border border-foreground  px-3 py-2 text-foreground text-sm focus:outline-none focus:border-red-400 resize-none mb-3"
+                        disabled={rejectingId === sub.id}
+                        className="w-full brutal-border bg-background border border-foreground  px-3 py-2 text-foreground text-sm focus:outline-none focus:border-red-400 resize-none mb-3 disabled:opacity-60"
                       />
                       <div className="flex gap-3">
                         <button
-                          onClick={() => handleReject(sub.id)}
-                          className="bg-red-500 hover:bg-red-600 text-foreground px-4 py-2  text-sm font-medium transition-colors"
+                          onClick={() => void handleReject(sub)}
+                          disabled={rejectingId === sub.id || isMissionClosed}
+                          className="bg-red-500 hover:bg-red-600 text-foreground px-4 py-2  text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Confirm Reject
+                          {rejectingId === sub.id ? "Rejecting…" : "Confirm Reject"}
                         </button>
                         <button
                           onClick={() => { setRejectConfirm(null); setRejectReason(""); }}
-                          className="border border-foreground hover:brutal-border bg-background text-foreground px-4 py-2  text-sm transition-colors"
+                          disabled={rejectingId === sub.id}
+                          className="border border-foreground hover:brutal-border bg-background text-foreground px-4 py-2  text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Cancel
                         </button>

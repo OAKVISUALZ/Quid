@@ -6,6 +6,7 @@ import {
   rpc,
   Horizon,
   Networks,
+  xdr,
 } from "@stellar/stellar-sdk";
 import { signFreighterTransaction, NETWORK_PASSPHRASE } from "@/lib/freighter-wallet";
 
@@ -49,6 +50,41 @@ export interface PayoutReceipt {
   missionId: string;
   hunter: string;
   simulated?: boolean;
+}
+
+export interface RejectSubmissionParams {
+  /** Numeric mission id on quid-store (u64). */
+  missionId: number | bigint;
+  /** The hunter whose submission is being rejected. */
+  hunterAddress: string;
+  /** The mission owner — must be the signing account, the contract requires its auth. */
+  ownerAddress: string;
+  /**
+   * Optional creator-facing reason (issue #321). `reject_submission` has no
+   * reason parameter on-chain, so this is never sent in the transaction — the
+   * caller is responsible for surfacing it in the UI / backend only.
+   */
+  reason?: string;
+}
+
+export interface RejectSubmissionReceipt {
+  success: boolean;
+  txHash: string;
+  missionId: string;
+  hunter: string;
+}
+
+export interface MissionActionParams {
+  /** Numeric mission id on quid-store (u64). */
+  missionId: number | bigint;
+  /** The mission owner — must be the signing account, the contract requires its auth. */
+  ownerAddress: string;
+}
+
+export interface MissionActionReceipt {
+  success: boolean;
+  txHash: string;
+  missionId: string;
 }
 
 /**
@@ -200,6 +236,171 @@ export async function payoutParticipantToContract({
       `Payout failed: ${error instanceof Error ? error.message : "unknown error"}`,
     );
   }
+}
+
+/**
+ * Shared simulate → sign → send → poll pipeline for the owner-gated
+ * `quid-store` entrypoints (`reject_submission`, `pause_mission`,
+ * `cancel_mission`). Each of those contract functions calls
+ * `mission.owner.require_auth()`, so `ownerAddress` must be the connected
+ * founder's wallet — signing as anyone else fails on-chain with
+ * `NotAuthorized` (#6), surfaced here as a `ContractInvokeError` for
+ * `parseQuidError` to translate.
+ *
+ * No simulated fallback (mirrors `payoutParticipantToContract`): a
+ * silently-successful pause/cancel/reject that never touched the chain would
+ * be worse than a visible error.
+ */
+async function invokeStoreOwnerCall(
+  fnName: string,
+  args: xdr.ScVal[],
+  ownerAddress: string,
+  actionLabel: string,
+): Promise<{ txHash: string }> {
+  if (!ownerAddress) {
+    throw new Error(`Connect the mission owner's wallet to ${actionLabel}`);
+  }
+
+  const rpcServer = new rpc.Server(RPC_URL);
+  const horizonServer = new Horizon.Server(HORIZON_URL);
+
+  try {
+    const account = await horizonServer.loadAccount(ownerAddress);
+    const contract = new Contract(STORE_CONTRACT_ID);
+
+    const callOp = contract.call(fnName, ...args);
+
+    const tx = new TransactionBuilder(account, {
+      fee: "100000",
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(callOp)
+      .setTimeout(180)
+      .build();
+
+    // Simulate first so contract errors (NotAuthorized, MissionClosed,
+    // SubmissionNotFound, ...) come back as a typed message before the user
+    // is asked to sign.
+    const simResult = await rpcServer.simulateTransaction(tx);
+
+    if (!rpc.Api.isSimulationSuccess(simResult)) {
+      throw new ContractInvokeError(simResult);
+    }
+
+    const txToSign = rpc.assembleTransaction(tx, simResult).build();
+    const signedXdr = await signFreighterTransaction(
+      txToSign.toXDR(),
+      ownerAddress,
+      NETWORK_PASSPHRASE as Networks,
+    );
+
+    const txFromXdr = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+
+    const sendRes = await rpcServer.sendTransaction(
+      txFromXdr as unknown as Parameters<typeof rpcServer.sendTransaction>[0],
+    );
+
+    if (sendRes.status === "ERROR") {
+      throw new ContractInvokeError(sendRes.errorResult);
+    }
+
+    let getTxRes = await rpcServer.getTransaction(sendRes.hash);
+    let attempts = 0;
+    while (getTxRes.status === "NOT_FOUND" && attempts < 15) {
+      await new Promise((r) => setTimeout(r, 1000));
+      getTxRes = await rpcServer.getTransaction(sendRes.hash);
+      attempts++;
+    }
+
+    if (getTxRes.status === "FAILED") {
+      throw new ContractInvokeError(describeSorobanFailure(getTxRes));
+    }
+
+    return { txHash: sendRes.hash };
+  } catch (error: unknown) {
+    if (error instanceof ContractInvokeError || error instanceof Error) {
+      throw error;
+    }
+    throw new Error(
+      `Failed to ${actionLabel}: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+  }
+}
+
+/**
+ * Builds and invokes `reject_submission` on quid-store (issue #321).
+ *
+ * Refunds the hunter's stake and marks the submission `Rejected` on-chain —
+ * see `quid-contract/contracts/quid-store/src/lib.rs`. The optional `reason`
+ * is never sent in the transaction (the contract has no reason parameter);
+ * callers surface it client-side only.
+ */
+export async function rejectSubmissionToContract({
+  missionId,
+  hunterAddress,
+  ownerAddress,
+}: RejectSubmissionParams): Promise<RejectSubmissionReceipt> {
+  if (!hunterAddress) {
+    throw new Error("Hunter address is required");
+  }
+
+  const { txHash } = await invokeStoreOwnerCall(
+    "reject_submission",
+    [
+      nativeToScVal(BigInt(missionId), { type: "u64" }),
+      new Address(hunterAddress).toScVal(),
+    ],
+    ownerAddress,
+    "reject this submission",
+  );
+
+  return {
+    success: true,
+    txHash,
+    missionId: missionId.toString(),
+    hunter: hunterAddress,
+  };
+}
+
+/**
+ * Builds and invokes `pause_mission` on quid-store (issue #322).
+ *
+ * Stops new submissions (`MissionNotOpen`, #10) without touching escrow —
+ * use `cancelMissionToContract` to also refund the unspent reward pool.
+ */
+export async function pauseMissionToContract({
+  missionId,
+  ownerAddress,
+}: MissionActionParams): Promise<MissionActionReceipt> {
+  const { txHash } = await invokeStoreOwnerCall(
+    "pause_mission",
+    [nativeToScVal(BigInt(missionId), { type: "u64" })],
+    ownerAddress,
+    "pause this quest",
+  );
+
+  return { success: true, txHash, missionId: missionId.toString() };
+}
+
+/**
+ * Builds and invokes `cancel_mission` on quid-store (issue #322).
+ *
+ * Refunds the unspent reward pool (unfilled slots × reward-per-slot) back to
+ * the founder's wallet and marks the mission `Cancelled`, which also blocks
+ * any further submissions or payouts.
+ */
+export async function cancelMissionToContract({
+  missionId,
+  ownerAddress,
+}: MissionActionParams): Promise<MissionActionReceipt> {
+  const { txHash } = await invokeStoreOwnerCall(
+    "cancel_mission",
+    [nativeToScVal(BigInt(missionId), { type: "u64" })],
+    ownerAddress,
+    "cancel this quest",
+  );
+
+  return { success: true, txHash, missionId: missionId.toString() };
 }
 
 /**
