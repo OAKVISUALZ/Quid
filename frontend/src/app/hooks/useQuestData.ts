@@ -5,17 +5,15 @@ import { creatorApiFetch, ApiSessionExpiredError } from "@/lib/creator-api";
 import { getApiBaseUrl } from "@/lib/api-base";
 
 /**
- * Issue #325: real data for a single creator quest (mission), replacing the
- * hardcoded placeholder this hook used to return.
+ * Issue #325 & #328: real data for a single creator quest (mission) and review queue.
  *
  * `GET /missions/:id` is public (no owner check), so the quest itself loads
  * regardless of wallet state. `GET /missions/:id/submissions` is owner-gated
- * on the backend (JwtAuthGuard + an ownerAddress check in MissionsService),
- * so submissions only load once a wallet is connected, and silently come
- * back empty for a non-owner rather than surfacing a 403 as a page error.
+ * on the backend (JwtAuthGuard + ownerAddress check). Non-owners are blocked
+ * (`isForbidden` flag surfaced) rather than silently hiding failure.
  */
 
-export type SubmissionStatus = "pending" | "approved" | "rejected";
+export type SubmissionStatus = "pending" | "approved" | "rejected" | "paid";
 /** Issue #322: `paused` blocks new submissions without touching escrow. */
 export type QuestStatus = "active" | "paused" | "completed" | "cancelled" | "draft";
 
@@ -45,6 +43,11 @@ export type Submission = {
   date: Date;
   /** Stellar address of the hunter, required to pay this submission. */
   hunterAddress?: string;
+  /** Issue #328: IPFS CID and extra review metadata */
+  ipfsCid?: string;
+  sentiment?: number | null;
+  rejectionReason?: string | null;
+  txHash?: string | null;
 };
 
 type MissionApiStatus = "OPEN" | "STARTED" | "PAUSED" | "COMPLETED" | "CANCELLED";
@@ -66,7 +69,10 @@ interface SubmissionApiResponse {
   hunterAddress: string;
   textPayload: string | null;
   ipfsCid: string;
-  status: "PENDING" | "APPROVED" | "REJECTED";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "PAID";
+  rejectionReason?: string | null;
+  sentiment?: number | null;
+  txHash?: string | null;
   createdAt: string;
   hunter?: { address: string; displayName: string | null };
 }
@@ -96,6 +102,10 @@ function mapSubmission(sub: SubmissionApiResponse): Submission {
     status: sub.status.toLowerCase() as SubmissionStatus,
     date: new Date(sub.createdAt),
     hunterAddress: sub.hunterAddress,
+    ipfsCid: sub.ipfsCid,
+    sentiment: sub.sentiment,
+    rejectionReason: sub.rejectionReason,
+    txHash: sub.txHash,
   };
 }
 
@@ -105,6 +115,8 @@ export function useQuestData(questId: string) {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isForbidden, setIsForbidden] = useState(false);
+  const [submissionsError, setSubmissionsError] = useState<string | null>(null);
 
   const fetchQuestData = useCallback(async () => {
     if (!questId) {
@@ -114,6 +126,8 @@ export function useQuestData(questId: string) {
 
     setLoading(true);
     setError(null);
+    setIsForbidden(false);
+    setSubmissionsError(null);
 
     try {
       const response = await fetch(`${getApiBaseUrl()}/missions/${questId}`);
@@ -151,13 +165,22 @@ export function useQuestData(questId: string) {
           if (subsResponse.ok) {
             const subs = (await subsResponse.json()) as SubmissionApiResponse[];
             setSubmissions(subs.map(mapSubmission));
-          } else {
-            // Not the owner (403) or nothing to show - not a page-level error.
+            setIsForbidden(false);
+          } else if (subsResponse.status === 403) {
+            // Issue #328: Non-owner blocked from viewing submissions
+            setIsForbidden(true);
             setSubmissions([]);
+            setSubmissionsError("You are not authorized to view submissions for this quest");
+          } else {
+            setSubmissions([]);
+            setSubmissionsError(`Failed to load submissions (${subsResponse.status})`);
           }
         } catch (subsErr) {
-          if (!(subsErr instanceof ApiSessionExpiredError)) {
+          if (subsErr instanceof ApiSessionExpiredError) {
+            setSubmissionsError("Your API session expired. Please reconnect your wallet.");
+          } else {
             console.warn("[Quid] Failed to load quest submissions:", subsErr);
+            setSubmissionsError("Failed to load submissions");
           }
           setSubmissions([]);
         }
@@ -176,5 +199,13 @@ export function useQuestData(questId: string) {
     return () => window.clearTimeout(timeoutId);
   }, [fetchQuestData]);
 
-  return { quest, submissions, loading, error, refetch: fetchQuestData };
+  return {
+    quest,
+    submissions,
+    loading,
+    error,
+    isForbidden,
+    submissionsError,
+    refetch: fetchQuestData,
+  };
 }

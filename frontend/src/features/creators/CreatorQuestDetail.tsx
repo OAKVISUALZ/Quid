@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { CheckCircle, AlertCircle } from "lucide-react";
+import { CheckCircle, AlertCircle, ShieldAlert } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonList } from "@/components/ui/skeleton-list";
 import QuestHeader from "./QuestHeader";
@@ -16,6 +16,7 @@ import {
   cancelMissionToContract,
   rejectSubmissionToContract,
 } from "@/lib/soroban-client";
+import { approveSubmissionApi, rejectSubmissionApi } from "@/lib/creator-api";
 import { getMissionTipTotal } from "@/lib/tip-jar-client";
 import { parseQuidError } from "@/lib/errorMap";
 import { toast } from "@/context/ToastContext";
@@ -33,6 +34,8 @@ export default function CreatorQuestDetail({
   isActive = true,
   loading = false,
   error,
+  isForbidden = false,
+  submissionsError,
   onRetry,
 }: {
   quest?: Quest | null;
@@ -42,6 +45,8 @@ export default function CreatorQuestDetail({
   loading?: boolean;
   /** Issue #325: set when the quest itself failed to load from the API. */
   error?: string | null;
+  isForbidden?: boolean;
+  submissionsError?: string | null;
   onRetry?: () => void;
 }) {
   const router = useRouter();
@@ -167,6 +172,15 @@ export default function CreatorQuestDetail({
         type: "success",
         message: `Paid ${submission.user}. Tx ${receipt.txHash.slice(0, 8)}…`,
       });
+
+      // Issue #328: sync approved status with backend review API
+      if (quest?.id && publicKey) {
+        try {
+          await approveSubmissionApi(quest.id, submission.id, publicKey);
+        } catch (apiErr) {
+          console.warn("[Quid] Backend approval sync failed:", apiErr);
+        }
+      }
     } catch (error: unknown) {
       // Map the numeric contract code (AlreadyPaid, MissionClosed,
       // NotAuthorized, ...) onto a message the founder can act on.
@@ -223,6 +237,20 @@ export default function CreatorQuestDetail({
         type: "success",
         message: `Rejected ${submission.user}'s submission. Their stake was refunded on-chain.`,
       });
+
+      // Issue #328: sync rejection status with backend review API
+      if (quest?.id && publicKey) {
+        try {
+          await rejectSubmissionApi(
+            quest.id,
+            submission.id,
+            publicKey,
+            rejectReason.trim() || undefined,
+          );
+        } catch (apiErr) {
+          console.warn("[Quid] Backend rejection sync failed:", apiErr);
+        }
+      }
     } catch (error: unknown) {
       const info = parseQuidError(error instanceof Error ? error.message : error);
       setNotification({
@@ -582,6 +610,26 @@ export default function CreatorQuestDetail({
               <TaskInfo />
             ) : loading ? (
               <SkeletonList count={2} variant="submission" />
+            ) : isForbidden || (!isOwner && quest && publicKey && quest.ownerAddress !== publicKey) ? (
+              <EmptyState
+                title="Access Restricted"
+                description="You are not authorized to view submissions for this quest. Only the quest founder can view and review responses."
+                icon={<ShieldAlert className="size-8 text-red-400" />}
+                variant="card"
+              />
+            ) : submissionsError ? (
+              <div className="brutal-border brutal-shadow bg-card p-6 text-center space-y-4 m-2">
+                <p className="text-red-400 text-sm font-semibold">{submissionsError}</p>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="brutal-border brutal-shadow bg-brutal-cyan px-4 py-2 font-bold uppercase text-xs"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
             ) : submissions.length === 0 ? (
               <EmptyState
                 title="No Submissions Yet"

@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { TbLayoutDashboard } from "react-icons/tb";
-import { RiFileList3Line, RiFlagLine } from "react-icons/ri";
+import { RiFileList3Line, RiFlagLine, RiFeedbackLine } from "react-icons/ri";
 import { BiSolidWallet } from "react-icons/bi";
 import { HiMenu, HiX } from "react-icons/hi";
 
@@ -62,6 +62,14 @@ export default function Sidebar() {
           >
             <RiFileList3Line size={18} />
             <span>Quests</span>
+          </Link>
+          <Link
+            href="/creator/responses"
+            className={linkClasses("/creator/responses")}
+            onClick={() => setIsOpen(false)}
+          >
+            <RiFeedbackLine size={18} />
+            <span>Responses</span>
           </Link>
           <Link
             href="/creator/milestones"

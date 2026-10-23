@@ -318,7 +318,7 @@ export default function CreatorDashboard() {
               </h2>
               <button
                 type="button"
-                onClick={() => router.push("/creator/quests")}
+                onClick={() => router.push("/creator/responses")}
                 className="group flex cursor-pointer items-center space-x-1 text-sm font-bold uppercase text-foreground transition-colors hover:text-brutal-violet"
               >
                 <span>View all</span>

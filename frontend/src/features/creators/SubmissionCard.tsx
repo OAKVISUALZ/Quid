@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Submission } from "@/app/hooks/useQuestData";
 import { useState } from "react";
 import { toast } from "@/context/ToastContext";
+import IpfsPreview from "@/components/creator/IpfsPreview";
 
 export default function SubmissionCard({
   submission,
@@ -38,6 +39,8 @@ export default function SubmissionCard({
     switch (status) {
       case "approved":
         return "bg-green-500/20 text-green-400 border border-green-500";
+      case "paid":
+        return "bg-emerald-500/20 text-emerald-400 border border-emerald-500";
       case "rejected":
         return "bg-red-500/20 text-red-400 border border-red-500";
       case "pending":
@@ -78,28 +81,33 @@ export default function SubmissionCard({
         </div>
         <div className="flex flex-col gap-3 pt-6">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center text-foreground px-2 md:px-4 gap-4 md:gap-0 w-full">
-            <div className="flex items-center gap-2 flex-1">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
               <Image
                 src="/quest-detail/avatar-quid.png"
                 alt={submission.user}
                 width={48}
                 height={48}
-                className="size-10 md:size-12 rounded-full"
+                className="size-10 md:size-12 rounded-full flex-shrink-0"
               />
-              <div className="flex flex-col gap-1 flex-1">
-                <p className="text-sm md:text-base font-medium">{submission.user}</p>
+              <div className="flex flex-col gap-1 flex-1 min-w-0">
+                <p className="text-sm md:text-base font-medium truncate">{submission.user}</p>
                 <p className="text-foreground text-xs md:text-sm">
                   Submitted{" "}
                   {typeof submission.date === "object"
                     ? submission.date.toLocaleDateString()
                     : submission.date}
                 </p>
-                <p className="text-xs md:text-sm text-gray-400 truncate">
+                <p className="text-xs md:text-sm text-gray-400 break-words">
                   {submission.content}
                 </p>
+                {submission.status === "rejected" && submission.rejectionReason && (
+                  <p className="text-xs text-red-300">
+                    Reason: {submission.rejectionReason}
+                  </p>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-3 md:gap-4">
+            <div className="flex items-center gap-3 md:gap-4 flex-shrink-0">
               <span
                 className={`px-3 py-1 rounded-full text-xs font-semibold capitalize ${getStatusColor(submission.status)}`}
               >
@@ -135,7 +143,13 @@ export default function SubmissionCard({
                 </span>
               )}
 
-              {submission.status === "approved" && onTip && (
+              {submission.status === "paid" && (
+                <span className="px-3 py-1 text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  Paid
+                </span>
+              )}
+
+              {(submission.status === "approved" || submission.status === "paid") && onTip && (
                 <button
                   onClick={onTip}
                   className="brutal-border brutal-shadow bg-brutal-yellow hover:translate-x-[-1px] hover:translate-y-[-1px] text-background px-3 py-1 text-sm font-medium transition-colors"
@@ -180,6 +194,16 @@ export default function SubmissionCard({
               </button>
             </div>
           </div>
+
+          {/* Issue #328: Show IPFS preview for submission */}
+          {submission.ipfsCid && (
+            <div className="px-2 md:px-4 mt-2">
+              <IpfsPreview
+                cid={submission.ipfsCid}
+                textPayload={submission.content}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

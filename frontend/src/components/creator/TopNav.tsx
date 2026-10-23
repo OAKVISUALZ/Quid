@@ -16,6 +16,10 @@ const topNavItems = [
     label: "Quests",
   },
   {
+    href: "/creator/responses",
+    label: "Responses",
+  },
+  {
     href: "/creator/wallet",
     label: "Wallet",
   },

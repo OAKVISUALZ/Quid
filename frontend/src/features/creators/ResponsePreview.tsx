@@ -1,5 +1,8 @@
+"use client";
+
 import React from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import avatar from '../../../public/avatar.png';
 
 interface ResponsePreviewProps {
@@ -16,8 +19,20 @@ export const ResponsePreview: React.FC<ResponsePreviewProps> = ({
   questTitle,
   timeSinceSubmission,
 }) => {
+  const router = useRouter();
+
   return (
-    <div className="flex items-center p-2 sm:p-3  hover:bg-[#1a1a2e]/50 transition-colors cursor-pointer group">
+    <div
+      onClick={() => router.push('/creator/responses')}
+      className="flex items-center p-2 sm:p-3 hover:bg-[#1a1a2e]/50 transition-colors cursor-pointer group rounded"
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          router.push('/creator/responses');
+        }
+      }}
+    >
       <div className="flex items-center space-x-2 sm:space-x-3 flex-1 min-w-0">
         {/* Avatar */}
         <div className="relative flex-shrink-0">
