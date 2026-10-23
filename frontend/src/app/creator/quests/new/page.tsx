@@ -1,10 +1,28 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import QuestsHub from "@/components/creator/quests/QuestsHub";
 import QuestWizard from "@/components/creator/quests/wizard/QuestWizard";
 import PublishSuccess from "@/components/creator/quests/wizard/PublishSuccess";
+
+function CreateQuestWizardContainer({
+  onPublish,
+}: {
+  onPublish: (id: string) => void;
+}) {
+  const searchParams = useSearchParams();
+  const initialResume = searchParams.get("resume") === "true";
+  const initialDraftId = searchParams.get("draftId") || undefined;
+
+  return (
+    <QuestWizard
+      onPublish={onPublish}
+      initialResume={initialResume}
+      initialDraftId={initialDraftId}
+    />
+  );
+}
 
 export default function CreateQuestPage() {
   const router = useRouter();
@@ -29,7 +47,15 @@ export default function CreateQuestPage() {
         />
 
         <div className="absolute inset-y-0 right-0 w-full border-l border-foreground/30 bg-background brutal-grid-bg shadow-2xl sm:w-[45%]">
-          <QuestWizard onPublish={setPublishedQuestId} />
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center p-6 text-xs uppercase tracking-wider text-muted-foreground">
+                Loading draft wizard...
+              </div>
+            }
+          >
+            <CreateQuestWizardContainer onPublish={setPublishedQuestId} />
+          </Suspense>
         </div>
       </div>
     </>

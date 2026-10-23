@@ -20,8 +20,8 @@ const PRIMARY_ACTION: Record<
     href: (id) => `/creator/quests/${id}`,
   },
   drafted: {
-    label: "Edit quest",
-    href: (id) => `/creator/quests/${id}/edit`,
+    label: "Resume draft",
+    href: (id) => `/creator/quests/new?resume=true&draftId=${encodeURIComponent(id)}`,
   },
   completed: {
     label: "View quest",
@@ -37,7 +37,7 @@ export default function QuestRow({ quest }: { quest: QuestRowData }) {
       ? null
       : quest.tab === "drafted"
         ? [
-            { label: "Edit quest", icon: SquarePen },
+            { label: "Resume draft", icon: SquarePen },
             { label: "Duplicate quest", icon: Copy },
             { label: "Delete draft", icon: Trash2, danger: true },
           ]
@@ -50,7 +50,11 @@ export default function QuestRow({ quest }: { quest: QuestRowData }) {
   return (
     <div className="flex items-start gap-4 py-4 sm:items-center">
       <Link
-        href={`/creator/quests/${quest.id}`}
+        href={
+          quest.tab === "drafted"
+            ? `/creator/quests/new?resume=true&draftId=${encodeURIComponent(quest.id)}`
+            : `/creator/quests/${quest.id}`
+        }
         className="flex min-w-0 flex-1 items-start gap-4  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5CF6] sm:items-center"
       >
         <Image

@@ -160,3 +160,84 @@ export function rewardCalculations(rewards: RewardsData) {
     rewardPerWinner,
   };
 }
+
+/**
+ * Issue #329: Restores wizard form fields from a saved backend draft.
+ */
+export function restoreWizardDataFromDraft(
+  draftData: unknown,
+  draftTitle?: string,
+): { data: QuestWizardData; currentIndex: number; maxReachedIndex: number } {
+  const defaultData = createDefaultWizardData();
+  if (!draftData || typeof draftData !== "object") {
+    if (draftTitle) {
+      defaultData.basics.title = draftTitle;
+    }
+    return { data: defaultData, currentIndex: 0, maxReachedIndex: 0 };
+  }
+
+  const raw = draftData as Record<string, unknown>;
+  const rawWizard = (raw._wizardState && typeof raw._wizardState === "object"
+    ? raw._wizardState
+    : {}) as Record<string, unknown>;
+  const rawBasics = (raw.basics && typeof raw.basics === "object"
+    ? raw.basics
+    : {}) as Record<string, unknown>;
+  const rawEligibility = (raw.eligibility && typeof raw.eligibility === "object"
+    ? raw.eligibility
+    : {}) as Record<string, unknown>;
+  const rawRewards = (raw.rewards && typeof raw.rewards === "object"
+    ? raw.rewards
+    : {}) as Record<string, unknown>;
+  const rawSchedule = (raw.schedule && typeof raw.schedule === "object"
+    ? raw.schedule
+    : {}) as Record<string, unknown>;
+
+  const restored: QuestWizardData = {
+    basics: {
+      ...defaultData.basics,
+      ...(rawBasics as Partial<QuestWizardData["basics"]>),
+      title:
+        typeof rawBasics.title === "string"
+          ? rawBasics.title
+          : draftTitle || defaultData.basics.title,
+    },
+    eligibility: {
+      ...defaultData.eligibility,
+      ...(rawEligibility as Partial<QuestWizardData["eligibility"]>),
+    },
+    tasks:
+      Array.isArray(raw.tasks) && raw.tasks.length > 0
+        ? raw.tasks.map((t) =>
+            createTaskBlock(
+              t && typeof t === "object" ? (t as Partial<TaskBlock>) : {},
+            ),
+          )
+        : defaultData.tasks,
+    rewards: {
+      ...defaultData.rewards,
+      ...(rawRewards as Partial<QuestWizardData["rewards"]>),
+    },
+    schedule: {
+      ...defaultData.schedule,
+      ...(rawSchedule as Partial<QuestWizardData["schedule"]>),
+    },
+  };
+
+  const currentIndex =
+    typeof rawWizard.currentIndex === "number" ? rawWizard.currentIndex : 0;
+  const maxReachedIndex =
+    typeof rawWizard.maxReachedIndex === "number"
+      ? rawWizard.maxReachedIndex
+      : currentIndex;
+
+  return {
+    data: restored,
+    currentIndex: Math.min(Math.max(0, currentIndex), WIZARD_STEPS.length - 1),
+    maxReachedIndex: Math.min(
+      Math.max(0, maxReachedIndex),
+      WIZARD_STEPS.length - 1,
+    ),
+  };
+}
+

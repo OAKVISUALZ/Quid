@@ -9,7 +9,7 @@ import type { QuestRowData, QuestTabKey } from "./types";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonList } from "@/components/ui/skeleton-list";
 import { useWallet } from "@/context/WalletProvider";
-import { creatorApiFetch } from "@/lib/creator-api";
+import { creatorApiFetch, fetchLatestMissionDraft } from "@/lib/creator-api";
 
 type MissionStatus = "OPEN" | "STARTED" | "PAUSED" | "COMPLETED" | "CANCELLED";
 
@@ -116,13 +116,63 @@ export default function QuestsHub() {
     setError(null);
 
     try {
-      const response = await creatorApiFetch("/missions/me", publicKey);
-      if (!response.ok) {
-        throw new Error(`Unable to load quests (${response.status})`);
+      const [missionsRes, draftRes] = await Promise.allSettled([
+        creatorApiFetch("/missions/me", publicKey),
+        fetchLatestMissionDraft(publicKey),
+      ]);
+
+      const questList: QuestRowData[] = [];
+
+      if (missionsRes.status === "fulfilled") {
+        if (!missionsRes.value.ok) {
+          throw new Error(`Unable to load quests (${missionsRes.value.status})`);
+        }
+        const missions = (await missionsRes.value.json()) as MissionResponse[];
+        questList.push(...missions.map(mapMissionToQuest));
+      } else {
+        throw missionsRes.reason;
       }
 
-      const missions = (await response.json()) as MissionResponse[];
-      setQuests(missions.map(mapMissionToQuest));
+      if (
+        draftRes.status === "fulfilled" &&
+        draftRes.value &&
+        !draftRes.value.publishedMissionId
+      ) {
+        const draft = draftRes.value;
+        const draftPayload = (draft.data && typeof draft.data === "object"
+          ? draft.data
+          : {}) as Record<string, unknown>;
+        const draftBasics = (draftPayload.basics &&
+        typeof draftPayload.basics === "object"
+          ? draftPayload.basics
+          : {}) as Record<string, unknown>;
+        const draftRewards = (draftPayload.rewards &&
+        typeof draftPayload.rewards === "object"
+          ? draftPayload.rewards
+          : {}) as Record<string, unknown>;
+
+        const perWinner = asNumber(draftRewards.amount) ?? 0;
+        const maxWinners = asNumber(draftRewards.maxWinners) ?? 0;
+        const pool = perWinner * maxWinners;
+
+        questList.unshift({
+          id: draft.id,
+          title: draft.title || "Untitled Draft",
+          tagLabel: "Draft",
+          tagVariant: "draft",
+          category:
+            typeof draftBasics.category === "string"
+              ? draftBasics.category
+              : "General",
+          pool,
+          perWinner,
+          responses: 0,
+          meta: `Last edited ${getRelativeTime(draft.updatedAt)}`,
+          tab: "drafted",
+        });
+      }
+
+      setQuests(questList);
     } catch (loadError) {
       setError(
         loadError instanceof Error
