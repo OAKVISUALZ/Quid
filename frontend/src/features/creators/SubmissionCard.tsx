@@ -5,6 +5,7 @@ import { Submission } from "@/app/hooks/useQuestData";
 import { useState } from "react";
 import { toast } from "@/context/ToastContext";
 import { ComingSoonBadge } from "@/components/ui/coming-soon";
+import IpfsSubmissionPreview from "./IpfsSubmissionPreview";
 
 export default function SubmissionCard({
   submission,
@@ -95,9 +96,6 @@ export default function SubmissionCard({
                     ? submission.date.toLocaleDateString()
                     : submission.date}
                 </p>
-                <p className="text-xs md:text-sm text-gray-400 truncate">
-                  {submission.content}
-                </p>
               </div>
             </div>
             <div className="flex items-center gap-3 md:gap-4">
@@ -187,6 +185,7 @@ export default function SubmissionCard({
               </button>
             </div>
           </div>
+          <IpfsSubmissionPreview cid={submission.ipfsCid} textPayload={submission.content} />
         </div>
       </div>
     </div>

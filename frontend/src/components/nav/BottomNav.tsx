@@ -80,7 +80,7 @@ export default function BottomNav({ mode }: { mode: DashboardMode }) {
         aria-label={config.navLabel}
         className="border-t-[3px] border-foreground bg-card pb-[env(safe-area-inset-bottom)]"
       >
-        <ul className="mx-auto grid w-full max-w-md grid-cols-5">
+        <ul className={`mx-auto grid w-full max-w-md ${mode === "creator" ? "grid-cols-6" : "grid-cols-5"}`}>
           {config.items.map((item) => {
             const Icon = item.icon;
             const isActive = isNavItemActive(pathname, item.href, config.basePath);

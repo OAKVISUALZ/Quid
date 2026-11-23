@@ -33,6 +33,7 @@ export default function CreatorQuestDetail({
   isActive = true,
   loading = false,
   error,
+  submissionsError,
   onRetry,
 }: {
   quest?: Quest | null;
@@ -42,6 +43,7 @@ export default function CreatorQuestDetail({
   loading?: boolean;
   /** Issue #325: set when the quest itself failed to load from the API. */
   error?: string | null;
+  submissionsError?: string | null;
   onRetry?: () => void;
 }) {
   const router = useRouter();
@@ -582,6 +584,13 @@ export default function CreatorQuestDetail({
               <TaskInfo />
             ) : loading ? (
               <SkeletonList count={2} variant="submission" />
+            ) : submissionsError ? (
+              <EmptyState
+                title="Could not load submissions"
+                description={submissionsError}
+                variant="card"
+                action={onRetry ? { label: "Try again", onClick: onRetry } : undefined}
+              />
             ) : submissions.length === 0 ? (
               <EmptyState
                 title="No Submissions Yet"

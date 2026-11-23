@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import { BiSolidWallet } from "react-icons/bi";
-import { RiBankLine, RiFileList3Line, RiFlagLine } from "react-icons/ri";
+import { RiBankLine, RiFileList3Line, RiFlagLine, RiMessage2Line } from "react-icons/ri";
 import { TbLayoutDashboard } from "react-icons/tb";
 import { LuClipboardCheck, LuScale, LuShieldCheck } from "react-icons/lu";
 import type { UpcomingFeatureId } from "@/lib/upcoming-features";
@@ -46,6 +46,7 @@ export const HUNTER_NAV_ITEMS: readonly NavItem[] = [
 export const CREATOR_NAV_ITEMS: readonly NavItem[] = [
   { href: "/creator", label: "Dashboard", icon: TbLayoutDashboard },
   { href: "/creator/quests", label: "Missions", icon: RiFileList3Line },
+  { href: "/creator/responses", label: "Responses", icon: RiMessage2Line },
   { href: "/creator/milestones", label: "Milestones", icon: RiFlagLine },
   { href: "/creator/wallet", label: "Wallet", icon: BiSolidWallet },
 ];

@@ -11,8 +11,8 @@ import { getApiBaseUrl } from "@/lib/api-base";
  * `GET /missions/:id` is public (no owner check), so the quest itself loads
  * regardless of wallet state. `GET /missions/:id/submissions` is owner-gated
  * on the backend (JwtAuthGuard + an ownerAddress check in MissionsService),
- * so submissions only load once a wallet is connected, and silently come
- * back empty for a non-owner rather than surfacing a 403 as a page error.
+ * so submissions only load once a wallet is connected. A 403 is surfaced as
+ * an owner-only access message instead of being mistaken for an empty queue.
  */
 
 export type SubmissionStatus = "pending" | "approved" | "rejected";
@@ -45,6 +45,7 @@ export type Submission = {
   date: Date;
   /** Stellar address of the hunter, required to pay this submission. */
   hunterAddress?: string;
+  ipfsCid?: string;
 };
 
 type MissionApiStatus = "OPEN" | "STARTED" | "PAUSED" | "COMPLETED" | "CANCELLED";
@@ -92,10 +93,11 @@ function mapSubmission(sub: SubmissionApiResponse): Submission {
   return {
     id: sub.id,
     user: sub.hunter?.displayName || (sub.hunter?.address ?? shortAddress(sub.hunterAddress)),
-    content: sub.textPayload || `IPFS: ${sub.ipfsCid}`,
+    content: sub.textPayload || "",
     status: sub.status.toLowerCase() as SubmissionStatus,
     date: new Date(sub.createdAt),
     hunterAddress: sub.hunterAddress,
+    ipfsCid: sub.ipfsCid,
   };
 }
 
@@ -105,6 +107,7 @@ export function useQuestData(questId: string) {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [submissionsError, setSubmissionsError] = useState<string | null>(null);
 
   const fetchQuestData = useCallback(async () => {
     if (!questId) {
@@ -114,6 +117,7 @@ export function useQuestData(questId: string) {
 
     setLoading(true);
     setError(null);
+    setSubmissionsError(null);
 
     try {
       const response = await fetch(`${getApiBaseUrl()}/missions/${questId}`);
@@ -144,21 +148,25 @@ export function useQuestData(questId: string) {
         setSubmissions([]);
       } else {
         try {
-          const subsResponse = await creatorApiFetch(
-            `/missions/${questId}/submissions`,
-            publicKey,
-          );
-          if (subsResponse.ok) {
+          const subsResponse = await creatorApiFetch(`/missions/${questId}/submissions`, publicKey);
+          if (subsResponse.status === 403) {
+            setSubmissionsError("Only the mission owner can view its submissions.");
+            setSubmissions([]);
+          } else if (!subsResponse.ok) {
+            setSubmissionsError(`Unable to load submissions (${subsResponse.status}).`);
+            setSubmissions([]);
+          } else {
             const subs = (await subsResponse.json()) as SubmissionApiResponse[];
             setSubmissions(subs.map(mapSubmission));
-          } else {
-            // Not the owner (403) or nothing to show - not a page-level error.
-            setSubmissions([]);
           }
         } catch (subsErr) {
-          if (!(subsErr instanceof ApiSessionExpiredError)) {
-            console.warn("[Quid] Failed to load quest submissions:", subsErr);
-          }
+          setSubmissionsError(
+            subsErr instanceof ApiSessionExpiredError
+              ? "Your session expired. Reconnect your wallet to view submissions."
+              : subsErr instanceof Error
+                ? subsErr.message
+                : "Unable to load submissions.",
+          );
           setSubmissions([]);
         }
       }
@@ -176,5 +184,5 @@ export function useQuestData(questId: string) {
     return () => window.clearTimeout(timeoutId);
   }, [fetchQuestData]);
 
-  return { quest, submissions, loading, error, refetch: fetchQuestData };
+  return { quest, submissions, loading, error, submissionsError, refetch: fetchQuestData };
 }
