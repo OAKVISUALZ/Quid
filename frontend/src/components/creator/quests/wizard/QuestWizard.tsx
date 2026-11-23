@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, X } from "lucide-react";
 import WizardStepper from "./WizardStepper";
@@ -55,9 +55,39 @@ export default function QuestWizard({
   const [publishing, setPublishing] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { publicKey, balances } = useWallet();
+  const [resuming, setResuming] = useState(false);
   const availableWalletBalance = Number(
     balances.find((balance) => balance.asset_type === "native")?.balance ?? 0,
   );
+
+  useEffect(() => {
+    if (!publicKey || typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("resume") !== "latest") return;
+
+    let cancelled = false;
+    setResuming(true);
+    void creatorApiFetch("/missions/drafts/me", publicKey)
+      .then(async (response) => {
+        if (!response.ok) {
+          const detail = await response.text().catch(() => "");
+          throw new Error(detail || `Unable to load draft (${response.status})`);
+        }
+        return response.json() as Promise<{ data?: unknown }>;
+      })
+      .then((draft) => {
+        if (!cancelled && draft.data && typeof draft.data === "object") {
+          setDataState(draft.data as QuestWizardData);
+          setSaved(true);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : "Unable to resume draft.");
+      })
+      .finally(() => {
+        if (!cancelled) setResuming(false);
+      });
+    return () => { cancelled = true; };
+  }, [publicKey]);
 
   function setData(updater: (prev: QuestWizardData) => QuestWizardData) {
     setDataState(updater);
@@ -274,7 +304,7 @@ export default function QuestWizard({
 
       <div className="px-6">
         <h1 className="mb-4 text-xl font-semibold text-foreground">
-          {data.basics.title || "Create a mission"}
+          {resuming ? "Loading saved draft…" : data.basics.title || "Create a mission"}
         </h1>
         <WizardStepper
           currentIndex={currentIndex}

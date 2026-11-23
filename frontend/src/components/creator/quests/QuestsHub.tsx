@@ -24,6 +24,12 @@ interface MissionResponse {
   _count?: { submissions?: number };
 }
 
+interface MissionDraftResponse {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
 const TABS: { key: QuestTabKey; label: string }[] = [
   { key: "active", label: "Active Missions" },
   { key: "drafted", label: "Drafted" },
@@ -106,6 +112,7 @@ export default function QuestsHub() {
   const { connected, publicKey, connect } = useWallet();
   const [activeTab, setActiveTab] = useState<QuestTabKey>("active");
   const [quests, setQuests] = useState<QuestRowData[]>([]);
+  const [draft, setDraft] = useState<MissionDraftResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,13 +123,23 @@ export default function QuestsHub() {
     setError(null);
 
     try {
-      const response = await creatorApiFetch("/missions/me", publicKey);
+      const [response, draftResponse] = await Promise.all([
+        creatorApiFetch("/missions/me", publicKey),
+        creatorApiFetch("/missions/drafts/me", publicKey),
+      ]);
       if (!response.ok) {
         throw new Error(`Unable to load missions (${response.status})`);
       }
 
       const missions = (await response.json()) as MissionResponse[];
       setQuests(missions.map(mapMissionToQuest));
+      if (draftResponse.ok) {
+        setDraft((await draftResponse.json()) as MissionDraftResponse);
+      } else if (draftResponse.status === 404) {
+        setDraft(null);
+      } else {
+        throw new Error(`Unable to load your draft (${draftResponse.status})`);
+      }
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -142,10 +159,10 @@ export default function QuestsHub() {
   const counts = useMemo<Record<QuestTabKey, number>>(
     () => ({
       active: quests.filter((quest) => quest.tab === "active").length,
-      drafted: quests.filter((quest) => quest.tab === "drafted").length,
+      drafted: quests.filter((quest) => quest.tab === "drafted").length + (draft ? 1 : 0),
       completed: quests.filter((quest) => quest.tab === "completed").length,
     }),
-    [quests],
+    [draft, quests],
   );
 
   const visibleQuests = quests.filter((quest) => quest.tab === activeTab);
@@ -232,14 +249,37 @@ export default function QuestsHub() {
           activeTab === "active" ? (
             <EmptyActiveQuests />
           ) : (
-            <EmptyState
-              title={`No ${activeTab} missions`}
-              description={`You don't have any ${activeTab} missions right now.`}
-              variant="compact"
-            />
+            activeTab === "drafted" && draft ? (
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-white/10 p-4">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-foreground">{draft.title || "Untitled mission"}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Saved {getRelativeTime(draft.updatedAt)}</p>
+                </div>
+                <Link href="/creator/quests/new?resume=latest" className="shrink-0 rounded-md border border-white/15 px-3 py-1.5 text-sm text-foreground hover:bg-white/5">
+                  Resume draft
+                </Link>
+              </div>
+            ) : (
+              <EmptyState
+                title={`No ${activeTab} missions`}
+                description={`You don't have any ${activeTab} missions right now.`}
+                variant="compact"
+              />
+            )
           )
         ) : (
           <div className="divide-y divide-white/5">
+            {activeTab === "drafted" && draft ? (
+              <div className="flex items-center justify-between gap-4 border-b border-white/5 py-4">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-foreground">{draft.title || "Untitled mission"}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Saved {getRelativeTime(draft.updatedAt)}</p>
+                </div>
+                <Link href="/creator/quests/new?resume=latest" className="shrink-0 rounded-md border border-white/15 px-3 py-1.5 text-sm text-foreground hover:bg-white/5">
+                  Resume draft
+                </Link>
+              </div>
+            ) : null}
             {visibleQuests.map((quest) => (
               <QuestRow key={quest.id} quest={quest} />
             ))}
