@@ -69,4 +69,9 @@ pub enum DataKey {
     ModerationRegistry,
     /// Optional reputation registry (`quid-reputation`) attested on payout.
     ReputationContract,
+    /// Monotonically-increasing WASM upgrade counter (SC-004).
+    /// Stored in instance storage; starts at 1 for the initial deployment.
+    Version,
+    /// The contract admin address used to gate `upgrade` (SC-004).
+    Admin,
 }

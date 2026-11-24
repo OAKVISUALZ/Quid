@@ -2896,3 +2896,165 @@ fn test_reject_submission_requires_owner_auth() {
         SubmissionStatus::Pending
     );
 }
+
+// =============================================================================
+// SC-004 – Admin-gated WASM upgrade with contract version tracking
+// =============================================================================
+
+/// Helper: register the contract, set an admin, and return
+/// (env, contract_id, admin, token_address).
+fn setup_upgrade_env() -> (Env, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(QuidStoreContract, ());
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let owner = Address::generate(&env);
+    StellarAssetClient::new(&env, &token_address).mint(&owner, &1_000_000_000_000);
+
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize_admin(&admin);
+
+    (env, contract_id, admin, token_address)
+}
+
+#[test]
+fn test_initial_version_is_one() {
+    let (env, contract_id, _admin, _token) = setup_upgrade_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    assert_eq!(client.version(), 1u32);
+}
+
+#[test]
+fn test_upgrade_bumps_version_and_emits_event() {
+    let (env, contract_id, admin, _token) = setup_upgrade_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+
+    // Upload the same WASM as a "new" version (simulates a patched binary).
+    let wasm_hash = env
+        .deployer()
+        .upload_contract_wasm(QuidStoreContract::new_wasm_ref());
+
+    assert_eq!(client.version(), 1u32);
+    client.upgrade(&wasm_hash);
+    assert_eq!(client.version(), 2u32);
+
+    // Verify the Upgraded event was published.
+    let all_events = env.events().all();
+    let upgraded_events: soroban_sdk::Vec<_> = all_events
+        .iter()
+        .filter(|(_, topics, _)| {
+            if topics.len() < 2 {
+                return false;
+            }
+            let t0: Result<Symbol, _> = Symbol::try_from_val(&env, &topics.get_unchecked(0));
+            let t1: Result<Symbol, _> = Symbol::try_from_val(&env, &topics.get_unchecked(1));
+            matches!((t0, t1), (Ok(a), Ok(b))
+                if a == Symbol::new(&env, "contract") && b == Symbol::new(&env, "upgraded"))
+        })
+        .collect();
+    assert_eq!(upgraded_events.len(), 1);
+}
+
+#[test]
+fn test_upgrade_non_admin_fails() {
+    let (env, contract_id, _admin, _token) = setup_upgrade_env();
+    // Remove all mock auths so only real auth checks run.
+    env.mock_auths(&[]);
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    // Upload in the same env (needs mock_all_auths to upload, but we clear
+    // auth only for the actual upgrade call).
+    env.mock_all_auths();
+    let wasm_hash = env
+        .deployer()
+        .upload_contract_wasm(QuidStoreContract::new_wasm_ref());
+    // Now clear auth again for the upgrade call itself.
+    env.mock_auths(&[]);
+    let result = client.try_upgrade(&wasm_hash);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_mission_survives_upgrade() {
+    let (env, contract_id, _admin, token_address) = setup_upgrade_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let owner = Address::generate(&env);
+    StellarAssetClient::new(&env, &token_address).mint(&owner, &1_000_000_000_000);
+    let hunter = Address::generate(&env);
+    mint_tokens_for_hunter(&env, &token_address, &hunter, 1_000);
+
+    // Create a mission BEFORE the upgrade.
+    let reward = Reward {
+        reward_token: token_address.clone(),
+        reward_amount: 100,
+    };
+    let min_asset = MinAsset {
+        min_asset_token: None,
+        min_asset_amount: 0,
+    };
+    let mission_id = client.create_mission(
+        &owner,
+        &String::from_str(&env, "Pre-upgrade mission"),
+        &String::from_str(&env, "QmPreUpgrade"),
+        &reward,
+        &5u32,
+        &min_asset,
+        &None,
+    );
+
+    // Perform the upgrade.
+    let wasm_hash = env
+        .deployer()
+        .upload_contract_wasm(QuidStoreContract::new_wasm_ref());
+    client.upgrade(&wasm_hash);
+
+    // The mission created before the upgrade must still be readable.
+    let mission = client.get_mission(&mission_id);
+    assert_eq!(mission.id, mission_id);
+    assert_eq!(mission.status, MissionStatus::Open);
+
+    // And it must still be payable AFTER the upgrade.
+    let cid = String::from_str(&env, "QmPostUpgradeSub");
+    client.submit_feedback(&mission_id, &hunter, &cid, &token_address, &10i128);
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+    let balance_before = token_client.balance(&hunter);
+    client.payout_participant(&mission_id, &hunter);
+    let balance_after = token_client.balance(&hunter);
+
+    // Hunter gets reward (100) + returned stake (10).
+    assert_eq!(balance_after, balance_before + 100 + 10);
+    assert_eq!(client.version(), 2u32);
+}
+
+#[test]
+fn test_initialize_admin_requires_auth() {
+    let env = Env::default();
+    // No mock_all_auths – auth is strictly checked.
+    let contract_id = env.register(QuidStoreContract, ());
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    // Without any mock auth, the call must fail.
+    let result = client.try_initialize_admin(&admin);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_upgrade_without_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(QuidStoreContract, ());
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+
+    let wasm_hash = env
+        .deployer()
+        .upload_contract_wasm(QuidStoreContract::new_wasm_ref());
+
+    // No admin initialized → must return AdminNotSet.
+    let result = client.try_upgrade(&wasm_hash);
+    assert!(result.is_err());
+}

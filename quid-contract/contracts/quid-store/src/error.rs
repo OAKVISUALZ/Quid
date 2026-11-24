@@ -33,4 +33,10 @@ pub enum QuidError {
     /// `expire_mission` was called before the mission's deadline.
     MissionNotExpired = 24,
     ReputationNotSet = 25,
+    /// Admin address is not set; call `initialize_admin` first.
+    AdminNotSet = 26,
+    /// Only the admin may perform this action.
+    Unauthorized = 27,
+    /// Version counter would overflow u32 (effectively impossible in practice).
+    Overflow = 28,
 }

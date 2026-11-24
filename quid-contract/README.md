@@ -312,6 +312,82 @@ stellar contract invoke \
 - `slash_hunter_stake` / treasury helpers
 - `set_fee_collector` / `get_fee_collector` — route the protocol fee to `quid-fee-collector`
 - `set_moderation_registry` / `get_moderation_registry` — reject banned/muted hunters in `submit_feedback` via `quid-moderation-registry`
+- `initialize_admin` / `get_admin` — set the upgrade-gating admin address (SC-004)
+- `upgrade(new_wasm_hash)` — admin-only; swaps the WASM and bumps `Version` (SC-004)
+- `version()` — read-only; returns the current `u32` version counter (SC-004)
+
+#### Storage keys — `quid-store` (SC-004 additions)
+
+All storage keys are `DataKey` enum variants (see `src/types.rs`):
+
+| Key | Storage tier | Type | Description |
+|-----|-------------|------|-------------|
+| `DataKey::Version` | Instance | `u32` | Monotonically-increasing WASM upgrade counter. Starts at **1** on first deployment and increments by 1 on every successful `upgrade` call. |
+| `DataKey::Admin` | Instance | `Address` | The address authorised to call `upgrade`. Set once via `initialize_admin`; can be rotated by the current admin calling `initialize_admin` again. |
+
+> [!NOTE]
+> Both keys are stored in **instance** storage.  Soroban's instance storage
+> shares its TTL with the contract instance itself — as long as the contract is
+> alive the keys are accessible without an explicit `extend_ttl` call.
+
+#### Upgrade runbook (testnet)
+
+**Step 1 — build the patched WASM**
+
+```bash
+# From quid-contract/
+cargo build --release --target wasm32-unknown-unknown -p quid-store
+```
+
+The optimised binary is written to
+`target/wasm32-unknown-unknown/release/quid_store.wasm`.
+
+**Step 2 — upload the new WASM to the network**
+
+```bash
+stellar contract upload \
+  --source <ADMIN_KEYPAIR_OR_ALIAS> \
+  --network testnet \
+  --wasm target/wasm32-unknown-unknown/release/quid_store.wasm
+```
+
+The command prints a 64-character hex hash, e.g.
+`a1b2c3...`.  This is the `new_wasm_hash` you will pass to `upgrade`.
+
+**Step 3 — call `upgrade` on the live contract**
+
+```bash
+stellar contract invoke \
+  --id <QUID_STORE_CONTRACT_ID> \
+  --source <ADMIN_KEYPAIR_OR_ALIAS> \
+  --network testnet \
+  --send=yes \
+  -- \
+  upgrade \
+  --new_wasm_hash a1b2c3...
+```
+
+Replace `a1b2c3...` with the full 64-character hash from Step 2.
+
+**Step 4 — confirm the upgrade**
+
+```bash
+stellar contract invoke \
+  --id <QUID_STORE_CONTRACT_ID> \
+  --source <ADMIN_KEYPAIR_OR_ALIAS> \
+  --network testnet \
+  -- \
+  version
+```
+
+The returned value should equal the previous version incremented by 1.
+Existing missions, submissions, and stakes are preserved — the WASM swap is
+atomic and storage is not touched.
+
+> [!IMPORTANT]
+> The admin key (`--source`) must match the address stored in `DataKey::Admin`.
+> A non-admin call returns `Error(Contract, #27)` (`Unauthorized`) without
+> touching the WASM.
 
 #### Event catalog and schema stability
 
@@ -329,6 +405,7 @@ values as Stellar addresses.
 | `MissionCancelEvent` | `["mission", "cancel"]` | `mission_id: u64` (single-value data) | `cancel_mission`, after cancellation and refunds |
 | `MissionPauseEvent` | `["mission", "pause"]` | `mission_id: u64` (single-value data) | `pause_mission`, after the mission is paused |
 | `FeeChargedEvent` | `["fee", "charged"]` | `mission_id: u64`, `token: Address`, `amount: i128` | `create_mission`, only when a non-zero protocol fee is charged |
+| `UpgradedEvent` | `["contract", "upgraded"]` | `old_version: u32`, `new_version: u32`, `wasm_hash: BytesN<32>` | `upgrade`, after the WASM is swapped and the version counter is bumped (SC-004) |
 
 `update_mission_status` emits no event. Adding a new event or changing an
 existing topic, field order, field type, or single-value encoding requires a

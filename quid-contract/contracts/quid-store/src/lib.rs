@@ -6,12 +6,13 @@
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contractclient, contractevent, contractimpl, contracttype, vec, Address, Env,
+    contract, contractclient, contractevent, contractimpl, contracttype, vec, Address, BytesN, Env,
     IntoVal, String, Symbol,
 };
 
 mod error;
 mod types;
+mod upgrade;
 
 use error::QuidError;
 use soroban_sdk::token;
@@ -19,6 +20,14 @@ use types::{DataKey, Mission, MissionStatus, Submission, SubmissionStatus};
 
 /// `attestation_type` written on the reputation record a payout produces.
 const PAYOUT_ATTESTATION_TYPE: &str = "quid-payout";
+
+/// Emitted when the contract wasm is successfully upgraded (SC-004).
+#[contractevent(topics = ["contract", "upgraded"])]
+pub struct UpgradedEvent {
+    pub old_version: u32,
+    pub new_version: u32,
+    pub wasm_hash: BytesN<32>,
+}
 
 #[contractevent(topics = ["mission", "create"])]
 pub struct MissionCreateEvent {
@@ -1033,6 +1042,63 @@ impl QuidStoreContract {
         }
 
         0
+    }
+
+    // -------------------------------------------------------------------------
+    // SC-004 – Admin-gated WASM upgrade with contract version tracking
+    // -------------------------------------------------------------------------
+
+    /// One-time admin registration.
+    ///
+    /// Must be called once after deployment (or after the first upgrade) to
+    /// set the address that is allowed to call `upgrade`.  The caller must
+    /// authorize as `admin`.  Once set, the slot can only be overwritten by the
+    /// current admin (via another `initialize_admin` call with the current
+    /// admin's auth).
+    pub fn initialize_admin(env: Env, admin: Address) {
+        // If an admin is already stored, only that admin may change it.
+        if let Some(current) = Self::admin(&env) {
+            current.require_auth();
+        } else {
+            admin.require_auth();
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &admin);
+    }
+
+    /// Return the currently configured admin address, or an error if none is set.
+    pub fn get_admin(env: Env) -> Result<Address, QuidError> {
+        Self::admin(&env).ok_or(QuidError::AdminNotSet)
+    }
+
+    /// Upgrade the contract WASM and bump the on-chain version counter.
+    ///
+    /// Only the admin set by `initialize_admin` may call this.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), QuidError> {
+        let admin = Self::admin(&env).ok_or(QuidError::AdminNotSet)?;
+        admin.require_auth();
+
+        let (old_version, new_version) = upgrade::upgrade_to(&env, new_wasm_hash.clone())?;
+
+        UpgradedEvent {
+            old_version,
+            new_version,
+            wasm_hash: new_wasm_hash,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Return the current contract version (starts at 1, increments with each upgrade).
+    pub fn version(env: Env) -> u32 {
+        upgrade::current_version(&env)
+    }
+
+    // Private: resolve the admin from instance storage.
+    fn admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
     }
 }
 mod test;
