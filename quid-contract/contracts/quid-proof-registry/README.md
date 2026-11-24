@@ -13,6 +13,17 @@ Proof-of-Test registry: verifier attestations, M-of-N thresholds, and hunter-sub
 | `Threshold(mission)` | M-of-N threshold (default 1) | extended on write |
 | `ValidProof(mission, hunter)` | Validity index for payouts | extended on write |
 | `MissionProbe(mission)` | Configured quid-probe contract | extended on write |
+| `ChallengeWindow(mission)` | Creator challenge period in seconds | extended on write |
+| `ProofStatus(mission, hunter)` | Pending, valid, challenged, or rejected state | extended on write |
+| `ProofCreatedAt(mission, hunter)` | Timestamp used for the challenge window | extended on write |
+| `ChallengeReason(mission, hunter)` | Creator's reason CID | extended on write |
+
+Creators can call `set_challenge_window` before proofs are recorded. During the
+window, `has_valid_proof` remains false and `challenge_proof` can move a proof
+to `Challenged`. The configured arbiter resolves it with `resolve_challenge`;
+an upheld challenge becomes `Rejected`, while a rejected challenge becomes
+`Valid`. This maps to quid-dispute by using its arbiter decision as the
+`upheld` value.
 
 Proof records include a `ProofSource` value (`Verifier`, `Signed`, or `Probe`).
 After configuring the store, the mission owner can set its probe with

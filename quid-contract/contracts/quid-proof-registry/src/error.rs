@@ -15,4 +15,7 @@ pub enum ProofError {
     ThresholdTooHigh = 10,
     InvalidThreshold = 11,
     ProbeInteractionNotFound = 12,
+    ChallengeWindowClosed = 13,
+    ProofChallenged = 14,
+    ArbiterNotSet = 15,
 }
