@@ -33,4 +33,8 @@ pub enum QuidError {
     /// `expire_mission` was called before the mission's deadline.
     MissionNotExpired = 24,
     ReputationNotSet = 25,
+    /// The requirement is malformed (empty/too many functions or bad window).
+    InvalidRequirement = 26,
+    /// A requirement cannot be changed after the first submission.
+    RequirementLocked = 27,
 }

@@ -23,7 +23,12 @@ mod upgrade;
 
 use error::QuidError;
 use soroban_sdk::token;
-use types::{DataKey, Mission, MissionStatus, Submission, SubmissionStatus};
+use types::{
+    DataKey, Mission, MissionStatus, Submission, SubmissionStatus, TestRequirement,
+};
+
+pub(crate) const TTL_THRESHOLD: u32 = 172800;
+pub(crate) const TTL_EXTEND_TO: u32 = 5184000;
 
 /// `attestation_type` written on the reputation record a payout produces.
 const PAYOUT_ATTESTATION_TYPE: &str = "quid-payout";
@@ -183,6 +188,46 @@ pub struct QuidStoreContract;
 
 #[contractimpl]
 impl QuidStoreContract {
+    fn bump_mission(env: &Env, mission_id: u64) {
+        env.storage()
+            .persistent()
+            .extend_ttl(
+                &DataKey::Mission(mission_id),
+                TTL_THRESHOLD,
+                TTL_EXTEND_TO,
+            );
+    }
+
+    fn bump_submission(env: &Env, mission_id: u64, hunter: &Address) {
+        env.storage()
+            .persistent()
+            .extend_ttl(
+                &DataKey::Submission(mission_id, hunter.clone()),
+                TTL_THRESHOLD,
+                TTL_EXTEND_TO,
+            );
+    }
+
+    fn bump_requirement(env: &Env, mission_id: u64) {
+        env.storage()
+            .persistent()
+            .extend_ttl(
+                &DataKey::Requirement(mission_id),
+                TTL_THRESHOLD,
+                TTL_EXTEND_TO,
+            );
+    }
+
+    fn bump_submission_count(env: &Env, mission_id: u64) {
+        env.storage()
+            .persistent()
+            .extend_ttl(
+                &DataKey::SubmissionCount(mission_id),
+                TTL_THRESHOLD,
+                TTL_EXTEND_TO,
+            );
+    }
+
     /// Create mission
     ///
     /// `expires_at` is an optional unix timestamp. Once the ledger passes it the
@@ -286,10 +331,13 @@ impl QuidStoreContract {
 
     /// Get mission
     pub fn get_mission(env: Env, mission_id: u64) -> Result<Mission, QuidError> {
-        env.storage()
+        let mission = env
+            .storage()
             .persistent()
             .get(&DataKey::Mission(mission_id))
-            .ok_or(QuidError::MissionNotFound)
+            .ok_or(QuidError::MissionNotFound)?;
+        Self::bump_mission(&env, mission_id);
+        Ok(mission)
     }
 
     /// Get a single hunter submission, including its current review status.
@@ -298,10 +346,65 @@ impl QuidStoreContract {
         mission_id: u64,
         hunter: Address,
     ) -> Result<Submission, QuidError> {
-        env.storage()
+        let submission = env
+            .storage()
             .persistent()
             .get(&DataKey::Submission(mission_id, hunter))
-            .ok_or(QuidError::SubmissionNotFound)
+            .ok_or(QuidError::SubmissionNotFound)?;
+        Self::bump_submission(&env, mission_id, &hunter);
+        Ok(submission)
+    }
+
+    /// Set the proof-of-test requirement for a mission.
+    ///
+    /// Requirements may be set or overwritten until the first submission. This
+    /// preserves the old mission creation signature and leaves missions
+    /// without a requirement behaving exactly as before.
+    pub fn set_mission_requirement(
+        env: Env,
+        mission_id: u64,
+        req: TestRequirement,
+    ) -> Result<(), QuidError> {
+        let mission = Self::get_mission(env.clone(), mission_id)?;
+        mission.owner.require_auth();
+
+        let submission_count = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::SubmissionCount(mission_id));
+        if submission_count.is_some() {
+            Self::bump_submission_count(&env, mission_id);
+        }
+        if submission_count.unwrap_or(0) > 0 {
+            return Err(QuidError::RequirementLocked);
+        }
+
+        if req.functions.is_empty() || req.functions.len() > 10 {
+            return Err(QuidError::InvalidRequirement);
+        }
+        if req.window_end <= req.window_start {
+            return Err(QuidError::InvalidRequirement);
+        }
+
+        let key = DataKey::Requirement(mission_id);
+        env.storage().persistent().set(&key, &req);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// Get the optional proof-of-test requirement for a mission.
+    pub fn get_mission_requirement(
+        env: Env,
+        mission_id: u64,
+    ) -> Option<TestRequirement> {
+        let key = DataKey::Requirement(mission_id);
+        let requirement = env.storage().persistent().get(&key);
+        if requirement.is_some() {
+            Self::bump_requirement(&env, mission_id);
+        }
+        requirement
     }
 
     /// Submit Feedback
@@ -386,6 +489,19 @@ impl QuidStoreContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, 5184000, 5184000);
+
+        let count_key = DataKey::SubmissionCount(mission_id);
+        let submission_count = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&count_key)
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&count_key, &(submission_count.saturating_add(1)));
+        env.storage()
+            .persistent()
+            .extend_ttl(&count_key, TTL_THRESHOLD, TTL_EXTEND_TO);
 
         SubNewEvent {
             mission_id,

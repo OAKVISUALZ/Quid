@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Symbol, Vec};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Copy)]
 #[contracttype]
@@ -55,10 +55,23 @@ pub struct Submission {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TestRequirement {
+    pub target_contract: Address,
+    pub functions: Vec<Symbol>,
+    pub network: Symbol,
+    pub window_start: u64,
+    pub window_end: u64,
+    pub proof_registry: Address,
+}
+
+#[contracttype]
 pub enum DataKey {
     Mission(u64),
     MissionCount,
     Submission(u64, Address),
+    SubmissionCount(u64),
+    Requirement(u64),
     HunterStake(u64, Address),
     Treasury,
     /// Optional reusable hunter stake pool.

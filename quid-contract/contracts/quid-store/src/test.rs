@@ -1,12 +1,12 @@
 #![cfg(test)]
 
 use super::*;
-use crate::types::MissionStatus;
+use crate::types::{MissionStatus, TestRequirement};
 use soroban_sdk::testutils::Events;
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    Address, Env, Map as SorobanMap, String, Symbol, TryFromVal, Val,
+    Address, Env, Map as SorobanMap, String, Symbol, TryFromVal, Val, Vec,
 };
 
 fn setup_test_env() -> (Env, Address, Address, Address) {
@@ -2938,4 +2938,157 @@ fn test_update_mission_metadata_before_submission() {
     let mission = client.get_mission(&mission_id);
     assert_eq!(mission.title, String::from_str(&env, "Fixed title"));
     assert_eq!(mission.description_cid, String::from_str(&env, "QmFixed"));
+}
+
+#[test]
+fn test_set_and_get_mission_requirement() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let mission_id = create_pending_mission(&env, &client, &owner, &token_address, 5);
+    let target = Address::generate(&env);
+    let proof_registry = Address::generate(&env);
+
+    let requirement = TestRequirement {
+        target_contract: target.clone(),
+        functions: soroban_sdk::vec![&env, Symbol::new(&env, "swap")],
+        network: Symbol::new(&env, "testnet"),
+        window_start: 100,
+        window_end: 200,
+        proof_registry: proof_registry.clone(),
+    };
+
+    client.set_mission_requirement(&mission_id, &requirement);
+    assert_eq!(
+        client.get_mission_requirement(&mission_id),
+        Some(requirement)
+    );
+}
+
+#[test]
+fn test_overwrite_mission_requirement_before_submission() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let mission_id = create_pending_mission(&env, &client, &owner, &token_address, 5);
+
+    let first = TestRequirement {
+        target_contract: Address::generate(&env),
+        functions: soroban_sdk::vec![&env, Symbol::new(&env, "swap")],
+        network: Symbol::new(&env, "testnet"),
+        window_start: 100,
+        window_end: 200,
+        proof_registry: Address::generate(&env),
+    };
+    client.set_mission_requirement(&mission_id, &first);
+
+    let replacement = TestRequirement {
+        target_contract: Address::generate(&env),
+        functions: soroban_sdk::vec![&env, Symbol::new(&env, "deposit")],
+        network: Symbol::new(&env, "public"),
+        window_start: 300,
+        window_end: 400,
+        proof_registry: Address::generate(&env),
+    };
+    client.set_mission_requirement(&mission_id, &replacement);
+    assert_eq!(
+        client.get_mission_requirement(&mission_id),
+        Some(replacement)
+    );
+}
+
+#[test]
+fn test_mission_requirement_rejected_after_submission() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let hunter = Address::generate(&env);
+    mint_tokens_for_hunter(&env, &token_address, &hunter, 1_000);
+    let mission_id = create_pending_mission(&env, &client, &owner, &token_address, 5);
+
+    client.submit_feedback(
+        &mission_id,
+        &hunter,
+        &String::from_str(&env, "QmSubmission"),
+        &token_address,
+        &10,
+    );
+
+    let requirement = TestRequirement {
+        target_contract: Address::generate(&env),
+        functions: soroban_sdk::vec![&env, Symbol::new(&env, "swap")],
+        network: Symbol::new(&env, "testnet"),
+        window_start: 100,
+        window_end: 200,
+        proof_registry: Address::generate(&env),
+    };
+    assert_eq!(
+        client.try_set_mission_requirement(&mission_id, &requirement),
+        Err(Ok(QuidError::RequirementLocked))
+    );
+}
+
+#[test]
+fn test_mission_requirement_validation() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let mission_id = create_pending_mission(&env, &client, &owner, &token_address, 5);
+
+    let invalid_window = TestRequirement {
+        target_contract: Address::generate(&env),
+        functions: soroban_sdk::vec![&env, Symbol::new(&env, "swap")],
+        network: Symbol::new(&env, "testnet"),
+        window_start: 200,
+        window_end: 200,
+        proof_registry: Address::generate(&env),
+    };
+    assert_eq!(
+        client.try_set_mission_requirement(&mission_id, &invalid_window),
+        Err(Ok(QuidError::InvalidRequirement))
+    );
+
+    let empty_functions = TestRequirement {
+        target_contract: Address::generate(&env),
+        functions: Vec::new(&env),
+        network: Symbol::new(&env, "testnet"),
+        window_start: 100,
+        window_end: 200,
+        proof_registry: Address::generate(&env),
+    };
+    assert_eq!(
+        client.try_set_mission_requirement(&mission_id, &empty_functions),
+        Err(Ok(QuidError::InvalidRequirement))
+    );
+
+    let too_many_functions = TestRequirement {
+        target_contract: Address::generate(&env),
+        functions: soroban_sdk::vec![
+            &env,
+            Symbol::new(&env, "fn1"),
+            Symbol::new(&env, "fn2"),
+            Symbol::new(&env, "fn3"),
+            Symbol::new(&env, "fn4"),
+            Symbol::new(&env, "fn5"),
+            Symbol::new(&env, "fn6"),
+            Symbol::new(&env, "fn7"),
+            Symbol::new(&env, "fn8"),
+            Symbol::new(&env, "fn9"),
+            Symbol::new(&env, "fn10"),
+            Symbol::new(&env, "fn11"),
+        ],
+        network: Symbol::new(&env, "testnet"),
+        window_start: 100,
+        window_end: 200,
+        proof_registry: Address::generate(&env),
+    };
+    assert_eq!(
+        client.try_set_mission_requirement(&mission_id, &too_many_functions),
+        Err(Ok(QuidError::InvalidRequirement))
+    );
+}
+
+#[test]
+fn test_mission_without_requirement_returns_none() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let mission_id = create_pending_mission(&env, &client, &owner, &token_address, 5);
+
+    assert_eq!(client.get_mission_requirement(&mission_id), None);
 }

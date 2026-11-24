@@ -33,6 +33,8 @@ Closes [#289](https://github.com/Quid-proquo/Quid/issues/289),
 | `set_reputation_contract(new_reputation)` | current registry, or the new one on first claim | Reputation registry to attest into |
 | `get_reputation_contract()` | — | Current registry (`ReputationNotSet` when unwired) |
 | `get_mission_count()` / `mission_exists(id)` | — | Read-only helpers |
+| `set_mission_requirement(mission_id, req)` | mission `owner` | Set an optional proof-of-test target and function list before the first submission |
+| `get_mission_requirement(mission_id)` | — | Get the optional proof-of-test requirement |
 
 ## Mission expiry
 
@@ -130,6 +132,23 @@ attestation is actually written.
 | 20 | `MissionExpired` | Submission attempted after the deadline |
 | 21 | `MissionNotExpired` | `expire_mission` called before the deadline |
 | 22 | `ReputationNotSet` | Reputation registry read before it was configured |
+| 26 | `InvalidRequirement` | Empty or more than 10 functions, or `window_end <= window_start` |
+| 27 | `RequirementLocked` | Attempt to set or overwrite a requirement after the first submission |
+
+## Mission test requirements
+
+`TestRequirement` optionally identifies the on-chain target for a mission:
+`target_contract`, `functions`, `network`, `window_start`, `window_end`, and
+`proof_registry`. It is stored under `DataKey::Requirement(mission_id)`.
+`set_mission_requirement` is owner-authorized and may be called repeatedly only
+until the first submission. Requirements require one to ten function symbols
+and a window end strictly after its start. Missions with no requirement behave
+as before and do not enable proof enforcement.
+
+`DataKey::Requirement(mission_id)` is a persistent storage entry. Its TTL is
+extended whenever it is read or written. `DataKey::SubmissionCount(mission_id)`
+is also persistent and is extended on submission writes and requirement-lock
+checks.
 
 ## Wiring the optional collaborators
 
