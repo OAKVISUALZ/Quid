@@ -63,6 +63,8 @@ jobs:
       NEXT_PUBLIC_API_URL: http://localhost:3001
       NEXT_PUBLIC_HORIZON_URL: https://horizon-testnet.stellar.org
       NEXT_PUBLIC_FRIENDBOT_URL: https://friendbot.stellar.org
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      NEXT_PUBLIC_PASSKEY_DOMAIN_HINT: localhost:3000
       NEXT_PUBLIC_STELLAR_EXPLORER_URL: https://stellar.expert/explorer/testnet
       NEXT_PUBLIC_USDC_ISSUER: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
     defaults:
@@ -85,6 +87,12 @@ jobs:
 
       - name: Linting
         run: npm run lint
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Frontend tests
+        run: npm test
 
       - name: Guard against hard-coded hex colors
         run: |

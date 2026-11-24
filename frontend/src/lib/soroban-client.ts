@@ -9,6 +9,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { signFreighterTransaction, NETWORK_PASSPHRASE } from "@/lib/freighter-wallet";
+import { assertKnownContract } from "@/lib/contract-allowlist";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
@@ -17,12 +18,8 @@ const HORIZON_URL =
 const STORE_CONTRACT_ID = process.env.NEXT_PUBLIC_QUID_STORE_ID;
 
 export function getStoreContract(): Contract {
-  if (!STORE_CONTRACT_ID || STORE_CONTRACT_ID.startsWith("CAAAAAAAAAAAAAAA")) {
-    throw new Error(
-      "The quid-store contract is not configured. Set NEXT_PUBLIC_QUID_STORE_ID to its deployed contract address.",
-    );
-  }
-  return new Contract(STORE_CONTRACT_ID);
+  const contractId = assertKnownContract(STORE_CONTRACT_ID, "quid-store");
+  return new Contract(contractId);
 }
 
 export interface SubmitFeedbackParams {

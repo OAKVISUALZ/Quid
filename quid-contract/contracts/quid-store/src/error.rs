@@ -37,4 +37,10 @@ pub enum QuidError {
     InvalidRequirement = 26,
     /// A requirement cannot be changed after the first submission.
     RequirementLocked = 27,
+    /// Mission requires a verified proof and hunter has none.
+    ProofMissing = 26,
+    /// Stake tier config invalid (length mismatch or bps not descending).
+    InvalidStakeTiers = 27,
+    /// Rate limit reached for hunter within rolling window (SC-021).
+    RateLimited = 28,
 }

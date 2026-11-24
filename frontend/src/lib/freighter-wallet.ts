@@ -6,6 +6,7 @@ import {
   signTransaction,
 } from '@stellar/freighter-api';
 import { Networks } from '@stellar/stellar-sdk';
+import { getPasskeyDomainHint } from '@/lib/contract-allowlist';
 
 export const FREIGHTER_WALLET = {
   id: 'freighter',
@@ -71,7 +72,9 @@ export async function getFreighterNetwork(): Promise<string | undefined> {
 export async function connectFreighter(): Promise<string> {
   const allowed = await setAllowed();
   if (!allowed) {
-    throw new Error('Freighter connection was not approved');
+    throw new Error(
+      `Freighter connection was not approved. Confirm ${getPasskeyDomainHint()} is the only domain allowed for this passkey.`
+    );
   }
 
   const { address } = await getAddress();

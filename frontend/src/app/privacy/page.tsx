@@ -4,6 +4,7 @@ import { ArrowLeft, Lock, ShieldCheck, Wallet } from 'lucide-react';
 import QuidLogo from '@/components/brand/QuidLogo';
 import { Footer } from '@/features/landing';
 import { brutalBtnPrimary } from '@/lib/brutalist-classes';
+import { SafeExternalLink } from '@/components/ui/safe-external-link';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy | Quid',
@@ -295,14 +296,13 @@ export default function PrivacyPage() {
             <p className="text-sm leading-relaxed text-muted-foreground">
               For any questions regarding this Privacy Policy or your data, please contact our team
               via our open-source GitHub repository at{' '}
-              <a
+              <SafeExternalLink
                 href="https://github.com/Quid-proquo/Quid"
-                target="_blank"
-                rel="noreferrer"
+                untrusted={false}
                 className="font-bold underline text-foreground hover:text-brutal-cyan transition-colors"
               >
                 github.com/Quid-proquo/Quid
-              </a>
+              </SafeExternalLink>
               .
             </p>
           </section>

@@ -17,3 +17,4 @@ quid-fee-collector = { path = "../quid-fee-collector" }
 quid-reputation = { path = "../quid-reputation" }
 quid-staking = { path = "../quid-staking" }
 quid-moderation-registry = { path = "../quid-moderation-registry" }
+quid-proof-registry = { path = "../quid-proof-registry" }

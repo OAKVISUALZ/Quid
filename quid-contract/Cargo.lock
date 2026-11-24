@@ -1040,6 +1040,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quid-proof-registry"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "rand",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "quid-quest-bundle"
 version = "0.0.0"
 dependencies = [
@@ -1073,6 +1082,7 @@ version = "0.0.0"
 dependencies = [
  "quid-fee-collector",
  "quid-moderation-registry",
+ "quid-proof-registry",
  "quid-reputation",
  "quid-staking",
  "soroban-sdk",

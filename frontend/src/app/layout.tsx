@@ -3,6 +3,7 @@ import { Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { WalletProvider } from "@/context/WalletProvider";
 import { ToastProvider } from "@/context/ToastContext";
+import { getSiteUrl } from "@/lib/site-url";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
@@ -15,8 +16,29 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Quid | On-Chain Verified QA & UX Testing",
-  description: "The On-Chain Verified QA & UX Testing Platform for Stellar & Soroban Builders",
+  metadataBase: new URL(getSiteUrl()),
+  title: {
+    default: "Quid | On-Chain Verified QA & UX Testing",
+    template: "%s | Quid",
+  },
+  description:
+    "The On-Chain Verified QA & UX Testing Platform for Stellar & Soroban Builders",
+  applicationName: "Quid",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "Quid",
+    url: "/",
+    title: "Quid | On-Chain Verified QA & UX Testing",
+    description:
+      "Find paid testing missions and build verifiable proof of work on Stellar.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Quid | On-Chain Verified QA & UX Testing",
+    description: "Paid testing missions with verifiable on-chain proof.",
+  },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({

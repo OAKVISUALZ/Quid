@@ -1,4 +1,5 @@
 use soroban_sdk::{contracttype, Address, String, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, String, Vec};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Copy)]
 #[contracttype]
@@ -63,6 +64,18 @@ pub struct TestRequirement {
     pub window_start: u64,
     pub window_end: u64,
     pub proof_registry: Address,
+pub struct StakeTiers {
+    /// Inclusive minimum reputation scores for each tier (ascending).
+    pub thresholds: Vec<u32>,
+    /// Stake multiplier in basis points for each tier (descending recommended).
+    pub bps: Vec<u32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TestRequirement {
+    /// Proof registry contract address.
+    pub registry: Address,
 }
 
 #[contracttype]
@@ -82,4 +95,30 @@ pub enum DataKey {
     ModerationRegistry,
     /// Optional reputation registry (`quid-reputation`) attested on payout.
     ReputationContract,
+    /// Optional proof registry for Proof-of-Test gating (SC-012).
+    ProofRegistry,
+    /// Per-mission test requirement pointing at a proof registry.
+    MissionTestRequirement(u64),
+    /// Per-mission stake tier configuration (SC-022).
+    MissionStakeTiers(u64),
+    /// Base stake amount configured for a mission (optional).
+    MissionBaseStake(u64),
+    /// Protocol-wide submission rate limit configuration (SC-021).
+    SubmissionRateLimit,
+    /// Per-hunter rolling window counter for submissions in temporary storage (SC-021).
+    HunterWindow(Address),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateLimit {
+    pub max: u32,
+    pub window_secs: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HunterWindowRecord {
+    pub window_start: u64,
+    pub count: u32,
 }

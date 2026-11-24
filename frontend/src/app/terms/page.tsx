@@ -4,6 +4,7 @@ import { ArrowLeft, FileText, ShieldCheck, Wallet } from 'lucide-react';
 import QuidLogo from '@/components/brand/QuidLogo';
 import { Footer } from '@/features/landing';
 import { brutalBtnPrimary } from '@/lib/brutalist-classes';
+import { SafeExternalLink } from '@/components/ui/safe-external-link';
 
 export const metadata: Metadata = {
   title: 'Terms and Conditions | Quid',
@@ -292,14 +293,13 @@ export default function TermsPage() {
               If you have any questions or require clarification regarding these Terms and
               Conditions, please join our community forum or contact us through our official
               GitHub repository at{' '}
-              <a
+              <SafeExternalLink
                 href="https://github.com/Quid-proquo/Quid"
-                target="_blank"
-                rel="noreferrer"
+                untrusted={false}
                 className="font-bold underline text-foreground hover:text-brutal-pink transition-colors"
               >
                 github.com/Quid-proquo/Quid
-              </a>
+              </SafeExternalLink>
               .
             </p>
           </section>

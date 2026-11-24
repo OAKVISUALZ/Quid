@@ -1,0 +1,42 @@
+# quid-proof-registry
+
+Proof-of-Test registry: verifier attestations, M-of-N thresholds, and hunter-submitted ed25519-signed proofs.
+
+## Storage keys
+
+| Key | Meaning | TTL |
+|-----|---------|-----|
+| `Verifier(Address)` | Registered verifier flag | extended on write |
+| `VerifierKey(Address)` | Ed25519 public key | extended on write |
+| `Proof(mission, hunter, tx_hash)` | Proof record | extended on write |
+| `Attestations(mission, hunter, tx_hash)` | Verifier addresses | extended on write |
+| `Threshold(mission)` | M-of-N threshold (default 1) | extended on write |
+| `ValidProof(mission, hunter)` | Validity index for payouts | extended on write |
+
+Removing a verifier does **not** invalidate past attestations.
+
+## Signed payload (SC-013 / BE-058)
+
+Hunters call `submit_signed_proof` with an ed25519 signature over the XDR encoding of:
+
+```text
+SignedPayload {
+  contract: Address,   // this registry contract id
+  mission_id: u64,
+  hunter: Address,
+  tx_hash: BytesN<32>,
+  data_cid: String,
+  expires_at: u64,     // unix seconds; rejected if ledger timestamp >
+}
+```
+
+Message bytes = `SignedPayload::to_xdr(env)` (Soroban XDR). Backend must sign the same bytes with the registered verifier key.
+
+### Test vector (illustrative)
+
+- `expires_at = 1700000000`
+- Verify with `env.crypto().ed25519_verify(pubkey, payload_xdr, signature)`.
+
+## Thresholds (SC-014)
+
+`set_mission_threshold(mission_id, m)` — when store is configured, only the mission owner may set it; otherwise admin. Default threshold is **1**.

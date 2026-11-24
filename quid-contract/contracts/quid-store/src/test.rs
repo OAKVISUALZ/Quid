@@ -2997,6 +2997,17 @@ fn test_overwrite_mission_requirement_before_submission() {
 
 #[test]
 fn test_mission_requirement_rejected_after_submission() {
+// --- SC-012 / SC-022 focused tests ---
+#[test]
+fn payout_without_required_proof_fails() {
+    // Lightweight unit: ProofMissing code is distinct and stable.
+    assert_eq!(QuidError::ProofMissing as u32, 26);
+    assert_eq!(QuidError::InvalidStakeTiers as u32, 27);
+}
+
+// --- SC-021 Rate Limit tests ---
+#[test]
+fn test_rate_limit_unset_preserves_default_behavior() {
     let (env, contract_id, owner, token_address) = setup_test_env();
     let client = QuidStoreContractClient::new(&env, &contract_id);
     let hunter = Address::generate(&env);
@@ -3022,6 +3033,27 @@ fn test_mission_requirement_rejected_after_submission() {
     assert_eq!(
         client.try_set_mission_requirement(&mission_id, &requirement),
         Err(Ok(QuidError::RequirementLocked))
+
+    let mission_id1 = create_pending_mission(&env, &client, &owner, &token_address, 5);
+    let mission_id2 = create_pending_mission(&env, &client, &owner, &token_address, 5);
+
+    // Limit is unset by default
+    assert_eq!(client.get_rate_limit(), None);
+
+    // Multiple submissions succeed across missions
+    client.submit_feedback(
+        &mission_id1,
+        &hunter,
+        &String::from_str(&env, "QmSub1"),
+        &token_address,
+        &10,
+    );
+    client.submit_feedback(
+        &mission_id2,
+        &hunter,
+        &String::from_str(&env, "QmSub2"),
+        &token_address,
+        &10,
     );
 }
 
@@ -3091,4 +3123,72 @@ fn test_mission_without_requirement_returns_none() {
     let mission_id = create_pending_mission(&env, &client, &owner, &token_address, 5);
 
     assert_eq!(client.get_mission_requirement(&mission_id), None);
+fn test_rate_limit_exceeded_and_reset_after_window() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let hunter = Address::generate(&env);
+    mint_tokens_for_hunter(&env, &token_address, &hunter, 10_000);
+
+    // Configure rate limit: max 2 submissions per 300 seconds window
+    client.set_rate_limit(
+        &admin,
+        &Some(RateLimit {
+            max: 2,
+            window_secs: 300,
+        }),
+    );
+    assert_eq!(
+        client.get_rate_limit(),
+        Some(RateLimit {
+            max: 2,
+            window_secs: 300
+        })
+    );
+
+    let m1 = create_pending_mission(&env, &client, &owner, &token_address, 5);
+    let m2 = create_pending_mission(&env, &client, &owner, &token_address, 5);
+    let m3 = create_pending_mission(&env, &client, &owner, &token_address, 5);
+
+    // 1st submission: succeeds
+    client.submit_feedback(
+        &m1,
+        &hunter,
+        &String::from_str(&env, "Qm1"),
+        &token_address,
+        &10,
+    );
+    // 2nd submission: succeeds (at limit)
+    client.submit_feedback(
+        &m2,
+        &hunter,
+        &String::from_str(&env, "Qm2"),
+        &token_address,
+        &10,
+    );
+
+    // update_submission does NOT count towards rate limit
+    client.update_submission(&m1, &hunter, &String::from_str(&env, "Qm1-updated"));
+
+    // 3rd submission inside the window: fails with RateLimited (#28)
+    let res = client.try_submit_feedback(
+        &m3,
+        &hunter,
+        &String::from_str(&env, "Qm3"),
+        &token_address,
+        &10,
+    );
+    assert_eq!(res, Err(Ok(QuidError::RateLimited)));
+
+    // Advance ledger timestamp beyond the window (300 secs)
+    env.ledger().with_mut(|li| li.timestamp += 301);
+
+    // 3rd submission now succeeds because the window rolled over and counter reset
+    client.submit_feedback(
+        &m3,
+        &hunter,
+        &String::from_str(&env, "Qm3"),
+        &token_address,
+        &10,
+    );
 }

@@ -30,6 +30,33 @@ export interface ListMissionsParams {
   limit?: number;
 }
 
+export type MissionVisibility = "public" | "unlisted" | "private";
+
+export function getMissionVisibility(mission: PublicMission): MissionVisibility {
+  const metadata = mission.metadata;
+  const visibility =
+    typeof metadata === "object" && metadata !== null
+      ? (metadata as Record<string, unknown>).visibility
+      : undefined;
+
+  if (visibility === "private" || visibility === "unlisted") return visibility;
+  return "public";
+}
+
+export function isIndexableMission(mission: PublicMission): boolean {
+  if (getMissionVisibility(mission) !== "public") return false;
+  return ["OPEN", "STARTED", "COMPLETED"].includes(mission.status);
+}
+
+export async function fetchPublicMission(id: string): Promise<PublicMission | null> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/missions/${encodeURIComponent(id)}`
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Unable to load mission (${response.status})`);
+  return (await response.json()) as PublicMission;
+}
+
 export async function fetchPublicMissions(
   params: ListMissionsParams = {},
 ): Promise<PublicMission[]> {

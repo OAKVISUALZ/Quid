@@ -16,6 +16,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { useWallet } from "@/app/hooks/useWallet";
+import { SafeExternalLink } from "@/components/ui/safe-external-link";
 
 
 
@@ -134,15 +135,14 @@ export default function WalletPage() {
                     />
                     {funding ? "Funding..." : "Fund with Friendbot"}
                   </button>
-                  <a
+                  <SafeExternalLink
                     href={`https://lab.stellar.org/account/fund?addr=${publicKey}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    untrusted={false}
                     className="flex items-center justify-center gap-2 min-h-11 border border-foreground hover:brutal-border bg-background text-foreground font-medium px-5 py-2.5  transition-colors"
                   >
                     Open Stellar Laboratory
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
+                    <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                  </SafeExternalLink>
                 </div>
               </div>
             </div>
@@ -294,15 +294,14 @@ export default function WalletPage() {
                           </div>
                         </td>
                         <td className="py-4 pr-4 max-w-[200px]">
-                          <a
+                          <SafeExternalLink
                             href={`https://stellar.expert/explorer/testnet/account/${tx.counterparty}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            untrusted={false}
                             title={tx.counterparty}
                             className="block truncate font-mono text-xs text-foreground hover:text-foreground"
                           >
                             {truncateKey(tx.counterparty)}
-                          </a>
+                          </SafeExternalLink>
                         </td>
                         <td
                           className={`py-4 pr-4 whitespace-nowrap tabular-nums ${

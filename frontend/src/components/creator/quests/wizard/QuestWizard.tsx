@@ -13,6 +13,7 @@ import RewardsStep, { isRewardsStepValid } from "./steps/RewardsStep";
 import ScheduleStep, { isScheduleStepValid } from "./steps/ScheduleStep";
 import ReviewStep from "./steps/ReviewStep";
 import { WIZARD_STEPS, createDefaultWizardData, type QuestWizardData } from "./types";
+import { FormErrorSummary } from "@/components/ui/form";
 import { toast } from "@/context/ToastContext";
 import { creatorApiFetch } from "@/lib/creator-api";
 import { useWallet } from "@/context/WalletProvider";
@@ -53,6 +54,7 @@ export default function QuestWizard({
   const [showPreview, setShowPreview] = useState(false);
   const [saved, setSaved] = useState(true);
   const [publishing, setPublishing] = useState(false);
+  const [showStepError, setShowStepError] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { publicKey, balances } = useWallet();
   const availableWalletBalance = Number(
@@ -79,15 +81,23 @@ export default function QuestWizard({
   const isLastStep = currentIndex === WIZARD_STEPS.length - 1;
 
   function goToStep(index: number) {
-    if (index <= maxReachedIndex) setCurrentIndex(index);
+    if (index <= maxReachedIndex) {
+      setCurrentIndex(index);
+      setShowStepError(false);
+    }
   }
 
   function handleBack() {
     setCurrentIndex((index) => Math.max(0, index - 1));
+    setShowStepError(false);
   }
 
   function handleContinue() {
-    if (!stepValid) return;
+    if (!stepValid) {
+      setShowStepError(true);
+      return;
+    }
+    setShowStepError(false);
 
     if (isLastStep) {
       void publishMission();
@@ -284,6 +294,13 @@ export default function QuestWizard({
       </div>
 
       <div className="mt-4 flex-1 overflow-y-auto border-t border-foreground/30 px-6 py-6">
+        {showStepError && !stepValid ? (
+          <FormErrorSummary
+            errors={[
+              `Complete every required field in ${WIZARD_STEPS[currentIndex].label.toLowerCase()} before continuing.`,
+            ]}
+          />
+        ) : null}
         {currentIndex === 0 ? (
           <BasicsStep
             data={data.basics}
