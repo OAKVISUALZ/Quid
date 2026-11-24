@@ -14,4 +14,5 @@ pub enum ProofError {
     Replay = 9,
     ThresholdTooHigh = 10,
     InvalidThreshold = 11,
+    ProbeInteractionNotFound = 12,
 }

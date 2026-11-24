@@ -12,6 +12,15 @@ Proof-of-Test registry: verifier attestations, M-of-N thresholds, and hunter-sub
 | `Attestations(mission, hunter, tx_hash)` | Verifier addresses | extended on write |
 | `Threshold(mission)` | M-of-N threshold (default 1) | extended on write |
 | `ValidProof(mission, hunter)` | Validity index for payouts | extended on write |
+| `MissionProbe(mission)` | Configured quid-probe contract | extended on write |
+
+Proof records include a `ProofSource` value (`Verifier`, `Signed`, or `Probe`).
+After configuring the store, the mission owner can set its probe with
+`set_mission_probe(caller, mission_id, probe)`. A hunter then calls
+`claim_probe_proof(mission_id, hunter, function)`; the registry calls the
+probe's `has_interaction` entrypoint and records a `Probe` proof only when it
+returns true. Probe claims use the zero transaction hash and are therefore
+single-use per mission and hunter.
 
 Removing a verifier does **not** invalidate past attestations.
 

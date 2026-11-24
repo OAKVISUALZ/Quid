@@ -5,7 +5,8 @@
 // same span, so the allowance has to live at crate level to cover them.
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
-    contract, contractclient, contractimpl, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Vec,
+    contract, contractclient, contractimpl, xdr::ToXdr, Address, Bytes, BytesN, Env, String,
+    Symbol, Vec,
 };
 
 mod error;
@@ -20,6 +21,11 @@ pub use types::*;
 #[contractclient(name = "StoreClient")]
 pub trait Store {
     fn get_mission_owner(env: Env, mission_id: u64) -> Address;
+}
+
+#[contractclient(name = "ProbeClient")]
+pub trait Probe {
+    fn has_interaction(env: Env, mission_id: u64, hunter: Address, function: Symbol) -> bool;
 }
 
 fn extend(env: &Env, key: &DataKey) {
@@ -58,6 +64,27 @@ impl QuidProofRegistry {
         env.storage()
             .instance()
             .set(&DataKey::StoreContract, &store);
+        Ok(())
+    }
+
+    pub fn set_mission_probe(
+        env: Env,
+        caller: Address,
+        mission_id: u64,
+        probe: Address,
+    ) -> Result<(), ProofError> {
+        caller.require_auth();
+        let store = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::StoreContract)
+            .ok_or(ProofError::NotInitialized)?;
+        if caller != StoreClient::new(&env, &store).get_mission_owner(&mission_id) {
+            return Err(ProofError::NotAuthorized);
+        }
+        let key = DataKey::MissionProbe(mission_id);
+        env.storage().persistent().set(&key, &probe);
+        extend(&env, &key);
         Ok(())
     }
 
@@ -147,7 +174,15 @@ impl QuidProofRegistry {
     ) -> Result<(), ProofError> {
         verifier.require_auth();
         Self::assert_verifier(&env, &verifier)?;
-        Self::add_attestation(&env, mission_id, &hunter, &tx_hash, &data_cid, &verifier)
+        Self::add_attestation(
+            &env,
+            mission_id,
+            &hunter,
+            &tx_hash,
+            &data_cid,
+            &verifier,
+            ProofSource::Verifier,
+        )
     }
 
     pub fn submit_signed_proof(
@@ -181,7 +216,42 @@ impl QuidProofRegistry {
         };
         let msg = payload_message(&env, &payload);
         env.crypto().ed25519_verify(&key, &msg, &signature);
-        Self::add_attestation(&env, mission_id, &hunter, &tx_hash, &data_cid, &verifier)
+        Self::add_attestation(
+            &env,
+            mission_id,
+            &hunter,
+            &tx_hash,
+            &data_cid,
+            &verifier,
+            ProofSource::Signed,
+        )
+    }
+
+    pub fn claim_probe_proof(
+        env: Env,
+        mission_id: u64,
+        hunter: Address,
+        function: Symbol,
+    ) -> Result<(), ProofError> {
+        hunter.require_auth();
+        let probe: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MissionProbe(mission_id))
+            .ok_or(ProofError::ProbeInteractionNotFound)?;
+        if !ProbeClient::new(&env, &probe).has_interaction(&mission_id, &hunter, &function) {
+            return Err(ProofError::ProbeInteractionNotFound);
+        }
+        let tx_hash = BytesN::from_array(&env, &[0; 32]);
+        Self::add_attestation(
+            &env,
+            mission_id,
+            &hunter,
+            &tx_hash,
+            &String::from_str(&env, "probe"),
+            &probe,
+            ProofSource::Probe,
+        )
     }
 
     pub fn has_valid_proof(env: Env, mission_id: u64, hunter: Address) -> bool {
@@ -211,6 +281,7 @@ impl QuidProofRegistry {
         tx_hash: &BytesN<32>,
         data_cid: &String,
         verifier: &Address,
+        source: ProofSource,
     ) -> Result<(), ProofError> {
         let pkey = DataKey::Proof(mission_id, hunter.clone(), tx_hash.clone());
         let akey = DataKey::Attestations(mission_id, hunter.clone(), tx_hash.clone());
@@ -241,6 +312,7 @@ impl QuidProofRegistry {
             data_cid: data_cid.clone(),
             attestation_count: count,
             valid,
+            source,
         };
         env.storage().persistent().set(&pkey, &record);
         extend(env, &pkey);
