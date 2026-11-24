@@ -271,6 +271,31 @@ impl QuidStoreContract {
             .persistent()
             .extend_ttl(&DataKey::Mission(mission_id), 5184000, 5184000);
 
+        // Update owner mission index (SC-009)
+        let owner_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnerMissionCount(owner.clone()))
+            .unwrap_or(0);
+        env.storage().persistent().set(
+            &DataKey::OwnerMissionAt(owner.clone(), owner_count),
+            &mission_id,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::OwnerMissionAt(owner.clone(), owner_count),
+            5184000,
+            5184000,
+        );
+        let new_owner_count = owner_count.saturating_add(1);
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnerMissionCount(owner.clone()), &new_owner_count);
+        env.storage().persistent().extend_ttl(
+            &DataKey::OwnerMissionCount(owner.clone()),
+            5184000,
+            5184000,
+        );
+
         if fee > 0 {
             let collector = Self::get_fee_collector(env.clone())?;
             Self::forward_fee(&env, &collector, &mission.reward_token, fee);
@@ -867,6 +892,86 @@ impl QuidStoreContract {
         env.storage()
             .persistent()
             .has(&DataKey::Mission(mission_id))
+    }
+
+    /// List missions paginated across all missions (SC-009).
+    ///
+    /// `start` is the starting mission ID (1-indexed).
+    /// `limit` is capped at 25 items per page.
+    pub fn list_missions(env: Env, start: u64, limit: u32) -> soroban_sdk::Vec<Mission> {
+        let max_limit = 25u32;
+        let effective_limit = if limit > max_limit { max_limit } else { limit };
+
+        let total_count = Self::get_mission_count(env.clone());
+        let mut result = soroban_sdk::Vec::new(&env);
+
+        if start == 0 || start > total_count || effective_limit == 0 {
+            return result;
+        }
+
+        let mut current_id = start;
+        let mut fetched = 0u32;
+
+        while current_id <= total_count && fetched < effective_limit {
+            if let Ok(mission) = Self::get_mission(env.clone(), current_id) {
+                result.push_back(mission);
+                fetched += 1;
+            }
+            match current_id.checked_add(1) {
+                Some(next) => current_id = next,
+                None => break,
+            }
+        }
+
+        result
+    }
+
+    /// List missions created by `owner`, paginated (SC-009).
+    ///
+    /// `start` is the 0-based index into the owner's mission list.
+    /// `limit` is capped at 25 items per page.
+    pub fn list_owner_missions(
+        env: Env,
+        owner: Address,
+        start: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<Mission> {
+        let max_limit = 25u32;
+        let effective_limit = if limit > max_limit { max_limit } else { limit };
+
+        let mut result = soroban_sdk::Vec::new(&env);
+
+        let owner_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnerMissionCount(owner.clone()))
+            .unwrap_or(0);
+
+        if start >= owner_count || effective_limit == 0 {
+            return result;
+        }
+
+        let mut idx = start;
+        let mut fetched = 0u32;
+
+        while idx < owner_count && fetched < effective_limit {
+            if let Some(mission_id) = env
+                .storage()
+                .persistent()
+                .get::<_, u64>(&DataKey::OwnerMissionAt(owner.clone(), idx))
+            {
+                if let Ok(mission) = Self::get_mission(env.clone(), mission_id) {
+                    result.push_back(mission);
+                    fetched += 1;
+                }
+            }
+            match idx.checked_add(1) {
+                Some(next) => idx = next,
+                None => break,
+            }
+        }
+
+        result
     }
 
     fn validate_mission_params(_title: &String, reward_amount: i128) -> Result<(), QuidError> {

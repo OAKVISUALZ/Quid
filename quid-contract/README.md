@@ -312,6 +312,18 @@ stellar contract invoke \
 - `slash_hunter_stake` / treasury helpers
 - `set_fee_collector` / `get_fee_collector` — route the protocol fee to `quid-fee-collector`
 - `set_moderation_registry` / `get_moderation_registry` — reject banned/muted hunters in `submit_feedback` via `quid-moderation-registry`
+- `list_missions(start, limit)` — bounded, paginated list of missions across all missions (limit capped at 25) (SC-009)
+- `list_owner_missions(owner, start, limit)` — bounded, paginated list of missions for an owner (limit capped at 25) (SC-009)
+
+#### Storage keys — `quid-store` (SC-009 additions)
+
+| Key | Storage tier | Type | Description |
+|-----|-------------|------|-------------|
+| `DataKey::OwnerMissionCount(Address)` | Persistent | `u32` | Number of missions created by `owner`. Extended via `extend_ttl` on every write. |
+| `DataKey::OwnerMissionAt(Address, u32)` | Persistent | `u64` | The mission ID at the given 0-based index for `owner`. Extended via `extend_ttl` on write. |
+
+> [!NOTE]
+> Pre-existing missions created prior to the SC-009 owner index introduction are not present in `DataKey::OwnerMissionAt`. Backfill is not needed on testnet.
 
 #### Event catalog and schema stability
 

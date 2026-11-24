@@ -93,4 +93,8 @@ pub enum DataKey {
     MissionStakeTiers(u64),
     /// Base stake amount configured for a mission (optional).
     MissionBaseStake(u64),
+    /// Number of missions created by an owner (SC-009).
+    OwnerMissionCount(Address),
+    /// 0-indexed mission id for a given owner at index u32 (SC-009).
+    OwnerMissionAt(Address, u32),
 }

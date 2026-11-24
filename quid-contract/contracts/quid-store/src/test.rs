@@ -2947,3 +2947,204 @@ fn payout_without_required_proof_fails() {
     assert_eq!(QuidError::ProofMissing as u32, 26);
     assert_eq!(QuidError::InvalidStakeTiers as u32, 27);
 }
+
+// =============================================================================
+// SC-009 – Owner and status index for paginated mission reads in quid-store
+// =============================================================================
+
+#[test]
+fn test_pagination_empty() {
+    let (env, contract_id, owner, _token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+
+    // No missions exist
+    let all_missions = client.list_missions(&1, &10);
+    assert_eq!(all_missions.len(), 0);
+
+    let owner_missions = client.list_owner_missions(&owner, &0, &10);
+    assert_eq!(owner_missions.len(), 0);
+}
+
+#[test]
+fn test_pagination_cap_and_boundaries() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+
+    // Create 30 missions for owner
+    for _i in 1..=30 {
+        let reward = Reward {
+            reward_token: token_address.clone(),
+            reward_amount: 10,
+        };
+        let min_asset = MinAsset {
+            min_asset_token: None,
+            min_asset_amount: 0,
+        };
+        client.create_mission(
+            &owner,
+            &String::from_str(&env, "Mission"),
+            &String::from_str(&env, "QmDesc"),
+            &reward,
+            &1,
+            &min_asset,
+            &None,
+        );
+    }
+
+    assert_eq!(client.get_mission_count(), 30);
+
+    // 1. Asking for limit > 25 returns at most 25
+    let page1 = client.list_missions(&1, &100);
+    assert_eq!(page1.len(), 25);
+    assert_eq!(page1.get_unchecked(0).id, 1);
+    assert_eq!(page1.get_unchecked(24).id, 25);
+
+    let owner_page1 = client.list_owner_missions(&owner, &0, &50);
+    assert_eq!(owner_page1.len(), 25);
+    assert_eq!(owner_page1.get_unchecked(0).id, 1);
+    assert_eq!(owner_page1.get_unchecked(24).id, 25);
+
+    // 2. Partial last page (items 26..=30)
+    let page2 = client.list_missions(&26, &10);
+    assert_eq!(page2.len(), 5);
+    assert_eq!(page2.get_unchecked(0).id, 26);
+    assert_eq!(page2.get_unchecked(4).id, 30);
+
+    let owner_page2 = client.list_owner_missions(&owner, &25, &10);
+    assert_eq!(owner_page2.len(), 5);
+    assert_eq!(owner_page2.get_unchecked(0).id, 26);
+    assert_eq!(owner_page2.get_unchecked(4).id, 30);
+
+    // 3. Out of bounds start returns empty
+    let page3 = client.list_missions(&31, &10);
+    assert_eq!(page3.len(), 0);
+
+    let owner_page3 = client.list_owner_missions(&owner, &30, &10);
+    assert_eq!(owner_page3.len(), 0);
+
+    // 4. Start at 0 for list_missions returns empty
+    let page_zero = client.list_missions(&0, &10);
+    assert_eq!(page_zero.len(), 0);
+}
+
+#[test]
+fn test_pagination_multiple_owners_isolation() {
+    let (env, contract_id, owner1, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+
+    let owner2 = Address::generate(&env);
+    let token_admin_client = StellarAssetClient::new(&env, &token_address);
+    token_admin_client.mint(&owner2, &1_000_000_000_000);
+
+    // Create 3 missions for owner1, 2 for owner2 interleaved
+    let reward = Reward {
+        reward_token: token_address.clone(),
+        reward_amount: 10,
+    };
+    let min_asset = MinAsset {
+        min_asset_token: None,
+        min_asset_amount: 0,
+    };
+
+    client.create_mission(
+        &owner1,
+        &String::from_str(&env, "M1"),
+        &String::from_str(&env, "C1"),
+        &reward,
+        &1,
+        &min_asset,
+        &None,
+    );
+    client.create_mission(
+        &owner2,
+        &String::from_str(&env, "M2"),
+        &String::from_str(&env, "C2"),
+        &reward,
+        &1,
+        &min_asset,
+        &None,
+    );
+    client.create_mission(
+        &owner1,
+        &String::from_str(&env, "M3"),
+        &String::from_str(&env, "C3"),
+        &reward,
+        &1,
+        &min_asset,
+        &None,
+    );
+    client.create_mission(
+        &owner2,
+        &String::from_str(&env, "M4"),
+        &String::from_str(&env, "C4"),
+        &reward,
+        &1,
+        &min_asset,
+        &None,
+    );
+    client.create_mission(
+        &owner1,
+        &String::from_str(&env, "M5"),
+        &String::from_str(&env, "C5"),
+        &reward,
+        &1,
+        &min_asset,
+        &None,
+    );
+
+    let o1_missions = client.list_owner_missions(&owner1, &0, &10);
+    assert_eq!(o1_missions.len(), 3);
+    assert_eq!(o1_missions.get_unchecked(0).id, 1);
+    assert_eq!(o1_missions.get_unchecked(1).id, 3);
+    assert_eq!(o1_missions.get_unchecked(2).id, 5);
+
+    let o2_missions = client.list_owner_missions(&owner2, &0, &10);
+    assert_eq!(o2_missions.len(), 2);
+    assert_eq!(o2_missions.get_unchecked(0).id, 2);
+    assert_eq!(o2_missions.get_unchecked(1).id, 4);
+
+    let all = client.list_missions(&1, &10);
+    assert_eq!(all.len(), 5);
+}
+
+#[test]
+fn test_pagination_cost_measurement_25_items() {
+    let (env, contract_id, owner, token_address) = setup_test_env();
+    let client = QuidStoreContractClient::new(&env, &contract_id);
+
+    for _ in 0..25 {
+        let reward = Reward {
+            reward_token: token_address.clone(),
+            reward_amount: 10,
+        };
+        let min_asset = MinAsset {
+            min_asset_token: None,
+            min_asset_amount: 0,
+        };
+        client.create_mission(
+            &owner,
+            &String::from_str(&env, "Bench Mission"),
+            &String::from_str(&env, "QmBenchDesc"),
+            &reward,
+            &1,
+            &min_asset,
+            &None,
+        );
+    }
+
+    // Reset or check budget before listing 25 items
+    env.cost_estimate().budget().reset_unlimited();
+
+    let page = client.list_owner_missions(&owner, &0, &25);
+    assert_eq!(page.len(), 25);
+
+    let cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    let mem = env.cost_estimate().budget().memory_bytes_cost();
+
+    // Verify budget metrics are positive and recorded
+    assert!(cpu > 0);
+    assert!(mem > 0);
+
+    let all_page = client.list_missions(&1, &25);
+    assert_eq!(all_page.len(), 25);
+}
